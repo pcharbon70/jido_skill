@@ -44,6 +44,12 @@ fi
 
 export PATH="$ERLANG_DIR/bin:$ELIXIR_DIR/bin:$PATH"
 
+if ! mix hex.info >/dev/null 2>&1; then
+  echo "[pre-commit] Bootstrapping Hex/Rebar..."
+  mix local.hex --force >/dev/null
+  mix local.rebar --force >/dev/null
+fi
+
 echo "[pre-commit] Running test suite..."
 mix test
 
