@@ -1,6 +1,6 @@
 defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   @moduledoc """
-  Subscribes to skill lifecycle signals and emits telemetry.
+  Subscribes to skill lifecycle and permission signals and emits telemetry.
 
   Phase 8 enriches telemetry metadata with lifecycle fields and bus context.
   """
@@ -25,8 +25,9 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     bus_name = Keyword.fetch!(opts, :bus_name)
 
     with {:ok, pre_sub} <- subscribe(bus_name, normalize_path("skill/pre")),
-         {:ok, post_sub} <- subscribe(bus_name, normalize_path("skill/post")) do
-      {:ok, %{bus_name: bus_name, subscriptions: [pre_sub, post_sub]}}
+         {:ok, post_sub} <- subscribe(bus_name, normalize_path("skill/post")),
+         {:ok, permission_sub} <- subscribe(bus_name, normalize_path("skill/permission/blocked")) do
+      {:ok, %{bus_name: bus_name, subscriptions: [pre_sub, post_sub, permission_sub]}}
     else
       {:error, reason} -> {:stop, {:subscription_failed, reason}}
     end
@@ -60,7 +61,9 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
         phase: lifecycle_value(data, :phase),
         skill_name: lifecycle_value(data, :skill_name),
         route: lifecycle_value(data, :route),
-        status: lifecycle_value(data, :status)
+        status: lifecycle_value(data, :status),
+        reason: lifecycle_value(data, :reason),
+        tools: lifecycle_value(data, :tools)
       }
     )
   end
