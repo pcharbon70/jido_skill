@@ -2,7 +2,8 @@ defmodule JidoSkill.SkillRuntime.Skill do
   @moduledoc """
   Skill runtime contract and markdown compiler.
 
-  Phase 4 implements frontmatter parsing and dynamic module compilation.
+  Phase 6 adds default route dispatch and pre/post hook emission for
+  compiled skill modules.
   """
 
   @callback mount(map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -14,6 +15,9 @@ defmodule JidoSkill.SkillRuntime.Skill do
   defmacro __using__(opts) do
     quote do
       @behaviour JidoSkill.SkillRuntime.Skill
+
+      alias Jido.Instruction
+      alias JidoSkill.SkillRuntime.HookEmitter
 
       @skill_name unquote(opts[:name])
       @skill_description unquote(opts[:description])
@@ -41,10 +45,89 @@ defmodule JidoSkill.SkillRuntime.Skill do
       def router(_config), do: @skill_router
 
       @impl JidoSkill.SkillRuntime.Skill
-      def handle_signal(signal, _skill_opts), do: {:skip, signal}
+      def handle_signal(signal, skill_opts) do
+        case find_matching_route(signal, @skill_router) do
+          nil ->
+            {:skip, signal}
+
+          {route, action} ->
+            global_hooks = Keyword.get(skill_opts, :global_hooks, %{})
+
+            :ok =
+              HookEmitter.emit_pre(
+                @skill_name,
+                route,
+                @skill_hooks,
+                global_hooks
+              )
+
+            signal_data = extract_signal_data(signal)
+
+            case Instruction.new(action: action, params: signal_data) do
+              {:ok, instruction} -> {:ok, instruction}
+              {:error, reason} -> {:error, {:instruction_build_failed, reason}}
+            end
+        end
+      end
 
       @impl JidoSkill.SkillRuntime.Skill
-      def transform_result(result, _action, _skill_opts), do: {:ok, result, []}
+      def transform_result(result, action, skill_opts) do
+        global_hooks = Keyword.get(skill_opts, :global_hooks, %{})
+        route = route_for_action(action, @skill_router)
+        status = status_for_result(result)
+
+        :ok =
+          HookEmitter.emit_post(
+            @skill_name,
+            route,
+            status,
+            @skill_hooks,
+            global_hooks
+          )
+
+        {:ok, result, []}
+      end
+
+      defp find_matching_route(signal, router) do
+        normalized_signal_type =
+          signal
+          |> signal_type()
+          |> normalize_route_path()
+
+        Enum.find(router, fn {route, _action} ->
+          normalize_route_path(route) == normalized_signal_type
+        end)
+      end
+
+      defp signal_type(%{type: type}) when is_binary(type), do: type
+      defp signal_type(%{"type" => type}) when is_binary(type), do: type
+      defp signal_type(_signal), do: nil
+
+      defp normalize_route_path(path) when is_binary(path), do: String.replace(path, ".", "/")
+      defp normalize_route_path(_path), do: nil
+
+      defp extract_signal_data(%{data: data}) when is_map(data), do: data
+      defp extract_signal_data(%{"data" => data}) when is_map(data), do: data
+      defp extract_signal_data(_signal), do: %{}
+
+      defp route_for_action(action, router) do
+        action_module = action_module(action)
+
+        case Enum.find(router, fn {_route, candidate_action} ->
+               candidate_action == action_module
+             end) do
+          {route, _candidate_action} -> route
+          nil -> "unknown"
+        end
+      end
+
+      defp action_module(%Instruction{action: action}), do: action
+      defp action_module(action) when is_atom(action), do: action
+      defp action_module(_action), do: nil
+
+      defp status_for_result({:error, _reason}), do: "error"
+      defp status_for_result(:error), do: "error"
+      defp status_for_result(_result), do: "ok"
 
       defoverridable mount: 2, router: 1, handle_signal: 2, transform_result: 3
     end

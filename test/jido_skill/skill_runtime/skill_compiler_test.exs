@@ -119,12 +119,10 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
   end
 
   defp tmp_dir(prefix) do
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "jido_skill_compiler_#{prefix}_#{System.unique_integer([:positive])}"
-      )
+    suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+    path = Path.join(System.tmp_dir!(), "jido_skill_compiler_#{prefix}_#{suffix}")
 
+    File.rm_rf!(path)
     File.mkdir_p!(path)
     path
   end
