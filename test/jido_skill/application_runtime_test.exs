@@ -2,7 +2,8 @@ defmodule JidoSkill.ApplicationRuntimeTest do
   use ExUnit.Case, async: false
 
   test "starts the phase 1 runtime children" do
-    bus_name = JidoSkill.Config.signal_bus_name()
+    {:ok, settings} = JidoSkill.Config.load_settings()
+    bus_name = settings.signal_bus.name
 
     assert {:ok, bus_pid} = Jido.Signal.Bus.whereis(bus_name)
     assert Process.alive?(bus_pid)
