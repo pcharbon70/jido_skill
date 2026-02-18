@@ -55,6 +55,41 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert post_metadata.skill_name == "pdf-processor"
     assert post_metadata.route == "pdf/extract/text"
     assert post_metadata.status == "error"
+    assert post_metadata.reason == nil
+    assert post_metadata.tools == nil
+  end
+
+  test "emits telemetry for permission-blocked signals" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+    start_supervised!({SkillLifecycleSubscriber, [name: nil, bus_name: bus_name]})
+
+    attach_handler!()
+
+    {:ok, blocked_signal} =
+      Signal.new(
+        "skill.permission.blocked",
+        %{
+          "skill_name" => "dispatcher-ask",
+          "route" => "demo/ask",
+          "reason" => "ask",
+          "tools" => ["Bash(git:*)"],
+          "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+        },
+        source: "/permissions/skill.permission.blocked"
+      )
+
+    assert {:ok, _} = Bus.publish(bus_name, [blocked_signal])
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.permission.blocked"
+    assert metadata.bus == bus_name
+    assert metadata.phase == nil
+    assert metadata.skill_name == "dispatcher-ask"
+    assert metadata.route == "demo/ask"
+    assert metadata.status == nil
+    assert metadata.reason == "ask"
+    assert metadata.tools == ["Bash(git:*)"]
   end
 
   test "ignores non-signal messages" do

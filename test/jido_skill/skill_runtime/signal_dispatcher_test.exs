@@ -159,11 +159,59 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
 
     assert SignalDispatcher.routes(dispatcher) == ["demo.ask"]
+    subscribe!(bus_name, "skill.permission.blocked")
 
     {:ok, signal} = Signal.new("demo.ask", %{"value" => "blocked"}, source: "/test/permissions")
     assert {:ok, _recorded} = Bus.publish(bus_name, [signal])
 
     refute_receive {:action_ran, "blocked"}, 300
+    assert_permission_blocked_signal("dispatcher-ask", "demo/ask", "ask", ["Bash(git:*)"])
+  end
+
+  test "skips execution and emits blocked signal when skill permissions are denied" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_denied")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    create_skill(
+      local_root,
+      "dispatcher-denied",
+      "demo/denied",
+      bus_name,
+      allowed_tools: "Bash(rm:*)"
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: hook_defaults(bus_name),
+           permissions: %{"allow" => [], "deny" => ["Bash(rm:*)"], "ask" => []}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.denied"]
+    subscribe!(bus_name, "skill.permission.blocked")
+
+    {:ok, signal} =
+      Signal.new("demo.denied", %{"value" => "blocked"}, source: "/test/permissions")
+
+    assert {:ok, _recorded} = Bus.publish(bus_name, [signal])
+
+    refute_receive {:action_ran, "blocked"}, 300
+    assert_permission_blocked_signal("dispatcher-denied", "demo/denied", "denied", ["Bash(rm:*)"])
   end
 
   defp create_skill(root, skill_name, route, bus_name, opts \\ []) do
@@ -251,4 +299,15 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
   defp allowed_tools_line(nil), do: ""
   defp allowed_tools_line(value), do: "allowed-tools: #{value}"
+
+  defp assert_permission_blocked_signal(skill_name, route, reason, tools) do
+    assert_receive {:signal, blocked_signal}, 1_000
+
+    assert blocked_signal.type == "skill.permission.blocked"
+    assert blocked_signal.data["skill_name"] == skill_name
+    assert blocked_signal.data["route"] == route
+    assert blocked_signal.data["reason"] == reason
+    assert blocked_signal.data["tools"] == tools
+    assert is_binary(blocked_signal.data["timestamp"])
+  end
 end

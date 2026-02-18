@@ -8,6 +8,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   - refresh route subscriptions when the skill registry changes
   - execute generated instructions with `Jido.Exec`
   - run `transform_result/3` and publish emitted signals
+  - emit permission-blocked signals for `ask` and `denied` decisions
   """
 
   use GenServer
@@ -269,6 +270,14 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
         dispatch_allowed_skill(module, skill_name, signal, global_hooks, bus_name)
 
       {:ask, tools} ->
+        emit_permission_blocked_signal(
+          bus_name,
+          skill_name,
+          signal.type,
+          "ask",
+          tools
+        )
+
         Logger.warning(
           "skill #{skill_name} requires approval for tools #{inspect(tools)}; skipping signal #{signal.type}"
         )
@@ -276,6 +285,14 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
         :skip
 
       {:denied, tools} ->
+        emit_permission_blocked_signal(
+          bus_name,
+          skill_name,
+          signal.type,
+          "denied",
+          tools
+        )
+
         Logger.warning(
           "skill #{skill_name} denied by permissions for tools #{inspect(tools)}; skipping signal #{signal.type}"
         )
@@ -312,6 +329,31 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   defp permission_status(skill) do
     Map.get(skill, :permission_status, :allowed)
+  end
+
+  defp emit_permission_blocked_signal(bus_name, skill_name, route, reason, tools) do
+    signal_type = normalize_path("skill/permission/blocked")
+
+    payload = %{
+      "skill_name" => skill_name,
+      "route" => normalize_route(route),
+      "reason" => reason,
+      "tools" => normalize_tools(tools),
+      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    with {:ok, signal} <-
+           Signal.new(signal_type, payload, source: "/permissions/#{signal_type}"),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "failed to emit permission blocked signal for #{skill_name}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
   end
 
   defp safe_handle_signal(module, signal, global_hooks) when is_atom(module) do
@@ -390,6 +432,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     :exit, _reason ->
       %{}
   end
+
+  defp normalize_route(route) when is_binary(route), do: String.replace(route, ".", "/")
+  defp normalize_route(route), do: route
+
+  defp normalize_tools(nil), do: []
+  defp normalize_tools(tools) when is_list(tools), do: Enum.map(tools, &to_string/1)
+  defp normalize_tools(tool), do: [to_string(tool)]
 
   defp normalize_path(path) when is_binary(path), do: String.replace(path, "/", ".")
   defp normalize_path(path), do: path

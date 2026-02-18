@@ -9,6 +9,7 @@ These contracts define the minimum signal surface for the initial implementation
 |------|----------|---------------|--------|
 | `skill/pre` | Hook emitter | `phase`, `skill_name`, `route`, `timestamp` | `/hooks/{signal_type}` |
 | `skill/post` | Hook emitter | `phase`, `skill_name`, `route`, `status`, `timestamp` | `/hooks/{signal_type}` |
+| `skill/permission/blocked` | Signal dispatcher | `skill_name`, `route`, `reason`, `tools`, `timestamp` | `/permissions/{signal_type}` |
 | `skill/registry/updated` | Skill registry | `skills`, `count` | `/skill_registry` |
 
 ## Path Format
@@ -22,3 +23,4 @@ These contracts define the minimum signal surface for the initial implementation
 1. Hook payload is merged from template data and runtime data.
 2. Runtime fields (`phase`, `skill_name`, `route`, `status`, `timestamp`) take precedence over template collisions.
 3. `status` is required for `skill/post` and omitted for `skill/pre`.
+4. `reason` in `skill/permission/blocked` is `ask` or `denied`; `tools` is the matched tool list.
