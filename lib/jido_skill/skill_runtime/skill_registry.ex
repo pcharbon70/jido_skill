@@ -1,9 +1,9 @@
 defmodule JidoSkill.SkillRuntime.SkillRegistry do
   @moduledoc """
-  Registry for loaded skill modules and hook defaults.
+  Registry for discovered skill definitions and hook defaults.
 
-  Phase 1 intentionally ships discovery/loading as a no-op scaffold to
-  establish supervision and API shape before parser/compiler work begins.
+  Phase 3 implements skill discovery and deterministic conflict handling:
+  local skill definitions override global definitions when names collide.
   """
 
   use GenServer
@@ -15,6 +15,16 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
   @type hook_defaults :: %{optional(:pre) => map(), optional(:post) => map()}
 
+  @type skill_entry :: %{
+          name: String.t(),
+          description: String.t() | nil,
+          version: String.t() | nil,
+          path: String.t(),
+          scope: :global | :local,
+          module: module() | nil,
+          loaded_at: DateTime.t()
+        }
+
   defstruct skills: %{},
             skill_paths: [],
             hook_defaults: %{},
@@ -24,7 +34,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
             local_path: nil
 
   @type t :: %__MODULE__{
-          skills: map(),
+          skills: %{optional(String.t()) => skill_entry()},
           skill_paths: [String.t()],
           hook_defaults: hook_defaults(),
           bus_name: atom() | String.t(),
@@ -36,17 +46,37 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+
+    if is_nil(name) do
+      GenServer.start_link(__MODULE__, opts)
+    else
+      GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
-  @spec get_skill(String.t()) :: module() | nil
-  def get_skill(name), do: GenServer.call(__MODULE__, {:get_skill, name})
+  @spec get_skill(String.t()) :: skill_entry() | nil
+  def get_skill(name), do: get_skill(__MODULE__, name)
+
+  @spec get_skill(GenServer.server(), String.t()) :: skill_entry() | nil
+  def get_skill(server, name), do: GenServer.call(server, {:get_skill, name})
+
+  @spec list_skills() :: [skill_entry()]
+  def list_skills, do: list_skills(__MODULE__)
+
+  @spec list_skills(GenServer.server()) :: [skill_entry()]
+  def list_skills(server), do: GenServer.call(server, :list_skills)
 
   @spec hook_defaults() :: hook_defaults()
-  def hook_defaults, do: GenServer.call(__MODULE__, :hook_defaults)
+  def hook_defaults, do: hook_defaults(__MODULE__)
+
+  @spec hook_defaults(GenServer.server()) :: hook_defaults()
+  def hook_defaults(server), do: GenServer.call(server, :hook_defaults)
 
   @spec reload() :: :ok
-  def reload, do: GenServer.call(__MODULE__, :reload)
+  def reload, do: reload(__MODULE__)
+
+  @spec reload(GenServer.server()) :: :ok
+  def reload(server), do: GenServer.call(server, :reload)
 
   @impl GenServer
   def init(opts) do
@@ -71,6 +101,12 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   end
 
   @impl GenServer
+  def handle_call(:list_skills, _from, state) do
+    list = state.skills |> Map.values() |> Enum.sort_by(& &1.name)
+    {:reply, list, state}
+  end
+
+  @impl GenServer
   def handle_call(:hook_defaults, _from, state) do
     {:reply, state.hook_defaults, state}
   end
@@ -91,8 +127,132 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   end
 
   defp load_all_skills(state) do
-    # Phase 1 scaffold: discovery and compilation are implemented in later phases.
-    %{state | skills: %{}}
+    loaded_at = DateTime.utc_now()
+
+    global_skills =
+      state
+      |> scope_root(:global)
+      |> load_skills_from_root(:global, loaded_at)
+
+    local_skills =
+      state
+      |> scope_root(:local)
+      |> load_skills_from_root(:local, loaded_at)
+
+    merged_skills = merge_skills(global_skills, local_skills)
+
+    %{state | skills: merged_skills}
+  end
+
+  defp scope_root(state, :global), do: expand_root(state.global_path)
+  defp scope_root(state, :local), do: expand_root(state.local_path)
+
+  defp expand_root(nil), do: nil
+
+  defp expand_root("~/" <> rest), do: Path.join(System.user_home!(), rest)
+  defp expand_root(path), do: path
+
+  defp load_skills_from_root(nil, _scope, _loaded_at), do: %{}
+
+  defp load_skills_from_root(root, scope, loaded_at) do
+    root
+    |> skill_files()
+    |> Enum.reduce(%{}, fn path, acc ->
+      case parse_skill_file(path, scope, loaded_at) do
+        {:ok, skill} ->
+          case Map.fetch(acc, skill.name) do
+            {:ok, existing} ->
+              Logger.warning(
+                "duplicate #{scope} skill name #{skill.name} encountered; " <>
+                  "keeping #{existing.path} and ignoring #{path}"
+              )
+
+              acc
+
+            :error ->
+              Map.put(acc, skill.name, skill)
+          end
+
+        {:error, reason} ->
+          Logger.warning("skipping skill file #{path}: #{inspect(reason)}")
+          acc
+      end
+    end)
+  end
+
+  defp skill_files(root) do
+    root
+    |> Path.join("**/SKILL.md")
+    |> Path.wildcard()
+    |> Enum.sort()
+  end
+
+  defp parse_skill_file(path, scope, loaded_at) do
+    with {:ok, content} <- File.read(path),
+         {:ok, frontmatter} <- parse_frontmatter(content),
+         {:ok, name} <- required_field(frontmatter, "name") do
+      {:ok,
+       %{
+         name: name,
+         description: Map.get(frontmatter, "description"),
+         version: Map.get(frontmatter, "version"),
+         path: path,
+         scope: scope,
+         module: nil,
+         loaded_at: loaded_at
+       }}
+    end
+  end
+
+  defp parse_frontmatter(content) do
+    case Regex.named_captures(~r/\A---\s*\n(?<frontmatter>.*?)\n---\s*(?:\n|$)/s, content) do
+      %{"frontmatter" => frontmatter} ->
+        {:ok, parse_frontmatter_lines(frontmatter)}
+
+      _ ->
+        {:error, :missing_frontmatter}
+    end
+  end
+
+  defp parse_frontmatter_lines(frontmatter) do
+    frontmatter
+    |> String.split("\n")
+    |> Enum.reduce(%{}, fn line, acc ->
+      case Regex.run(~r/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/, line, capture: :all_but_first) do
+        [key, value] ->
+          Map.put(acc, key, strip_quotes(value))
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp strip_quotes(value) do
+    value
+    |> String.trim()
+    |> String.trim_leading("\"")
+    |> String.trim_trailing("\"")
+    |> String.trim_leading("'")
+    |> String.trim_trailing("'")
+  end
+
+  defp required_field(frontmatter, key) do
+    case Map.get(frontmatter, key) do
+      nil -> {:error, {:missing_required_field, key}}
+      "" -> {:error, {:missing_required_field, key}}
+      value -> {:ok, value}
+    end
+  end
+
+  defp merge_skills(global_skills, local_skills) do
+    Map.merge(global_skills, local_skills, fn name, global_skill, local_skill ->
+      Logger.info(
+        "local skill #{name} from #{local_skill.path} overrides global skill from #{global_skill.path}"
+      )
+
+      local_skill
+    end)
   end
 
   defp publish_registry_update(state) do
