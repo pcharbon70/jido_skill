@@ -2,8 +2,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   @moduledoc """
   Subscribes to skill lifecycle signals and emits telemetry.
 
-  Phase 1 wires basic subscriptions so telemetry integration can be expanded
-  in later phases.
+  Phase 8 enriches telemetry metadata with lifecycle fields and bus context.
   """
 
   use GenServer
@@ -13,7 +12,12 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+
+    if is_nil(name) do
+      GenServer.start_link(__MODULE__, opts)
+    else
+      GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @impl GenServer
@@ -30,7 +34,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   @impl GenServer
   def handle_info({:signal, signal}, state) do
-    emit_telemetry(signal)
+    emit_telemetry(signal, state.bus_name)
     {:noreply, state}
   end
 
@@ -43,11 +47,28 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   defp normalize_path(path), do: String.replace(path, "/", ".")
 
-  defp emit_telemetry(signal) do
+  defp emit_telemetry(signal, bus_name) do
+    data = ensure_map(signal.data)
+
     :telemetry.execute(
       [:jido_skill, :skill, :lifecycle],
       %{count: 1},
-      %{type: signal.type, data: signal.data}
+      %{
+        type: signal.type,
+        data: data,
+        bus: bus_name,
+        phase: lifecycle_value(data, :phase),
+        skill_name: lifecycle_value(data, :skill_name),
+        route: lifecycle_value(data, :route),
+        status: lifecycle_value(data, :status)
+      }
     )
+  end
+
+  defp ensure_map(value) when is_map(value), do: value
+  defp ensure_map(_value), do: %{}
+
+  defp lifecycle_value(data, key) do
+    Map.get(data, key) || Map.get(data, Atom.to_string(key))
   end
 end
