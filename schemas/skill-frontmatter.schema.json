@@ -26,7 +26,10 @@
       "additionalProperties": false,
       "required": ["actions", "router"],
       "properties": {
-        "skill_module": { "type": "string" },
+        "skill_module": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"
+        },
         "actions": {
           "type": "array",
           "minItems": 1,
@@ -43,7 +46,7 @@
             "minProperties": 1,
             "maxProperties": 1,
             "propertyNames": {
-              "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
+              "pattern": "^[a-z0-9_-]+(?:/[a-z0-9_-]+)*$"
             },
             "additionalProperties": {
               "type": "string",
@@ -64,38 +67,25 @@
   },
   "$defs": {
     "hookOverride": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["enabled"],
-          "properties": {
-            "enabled": { "const": false }
-          }
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "signal_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
         },
-        {
+        "bus": {
+          "type": "string",
+          "pattern": "^:?[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "data": {
           "type": "object",
-          "additionalProperties": false,
-          "required": ["enabled", "signal_type", "bus"],
-          "properties": {
-            "enabled": { "type": "boolean", "default": true },
-            "signal_type": {
-              "type": "string",
-              "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
-            },
-            "bus": {
-              "type": "string",
-              "pattern": "^:?[A-Za-z_][A-Za-z0-9_]*$"
-            },
-            "data": {
-              "type": "object",
-              "additionalProperties": {
-                "type": ["string", "number", "integer", "boolean", "null"]
-              }
-            }
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
           }
         }
-      ]
+      }
     }
   }
 }
