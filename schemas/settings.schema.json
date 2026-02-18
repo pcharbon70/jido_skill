@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jidocode.dev/schemas/settings.schema.json",
+  "title": "JidoCode Settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "signal_bus", "hooks"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "signal_bus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "middleware": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["module"],
+            "properties": {
+              "module": { "type": "string" },
+              "opts": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "deny": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "ask": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre", "post"],
+      "properties": {
+        "pre": { "$ref": "#/$defs/hook" },
+        "post": { "$ref": "#/$defs/hook" }
+      }
+    }
+  },
+  "$defs": {
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "signal_type", "bus"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "signal_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
+        },
+        "bus": {
+          "type": "string",
+          "pattern": "^:?[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "data_template": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      }
+    }
+  }
+}

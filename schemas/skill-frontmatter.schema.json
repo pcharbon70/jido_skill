@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jidocode.dev/schemas/skill-frontmatter.schema.json",
+  "title": "Jido Skill Frontmatter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "description", "version", "jido"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "allowed-tools": {
+      "type": "string"
+    },
+    "jido": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actions", "router"],
+      "properties": {
+        "skill_module": { "type": "string" },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"
+          }
+        },
+        "router": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 1,
+            "propertyNames": {
+              "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"
+            }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pre": { "$ref": "#/$defs/hookOverride" },
+            "post": { "$ref": "#/$defs/hookOverride" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hookOverride": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "const": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "signal_type", "bus"],
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "signal_type": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+(?:/[a-z0-9_]+)*$"
+            },
+            "bus": {
+              "type": "string",
+              "pattern": "^:?[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "data": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["string", "number", "integer", "boolean", "null"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
