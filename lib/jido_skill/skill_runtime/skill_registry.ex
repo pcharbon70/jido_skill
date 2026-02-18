@@ -161,24 +161,28 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
     |> Enum.reduce(%{}, fn path, acc ->
       case parse_skill_file(path, scope, loaded_at) do
         {:ok, skill} ->
-          case Map.fetch(acc, skill.name) do
-            {:ok, existing} ->
-              Logger.warning(
-                "duplicate #{scope} skill name #{skill.name} encountered; " <>
-                  "keeping #{existing.path} and ignoring #{path}"
-              )
-
-              acc
-
-            :error ->
-              Map.put(acc, skill.name, skill)
-          end
+          put_unique_skill(acc, skill, scope, path)
 
         {:error, reason} ->
           Logger.warning("skipping skill file #{path}: #{inspect(reason)}")
           acc
       end
     end)
+  end
+
+  defp put_unique_skill(acc, skill, scope, path) do
+    case Map.fetch(acc, skill.name) do
+      {:ok, existing} ->
+        Logger.warning(
+          "duplicate #{scope} skill name #{skill.name} encountered; " <>
+            "keeping #{existing.path} and ignoring #{path}"
+        )
+
+        acc
+
+      :error ->
+        Map.put(acc, skill.name, skill)
+    end
   end
 
   defp skill_files(root) do

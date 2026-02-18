@@ -6,6 +6,8 @@ defmodule JidoSkill.Config do
   schema-backed loading and merge semantics without changing call sites.
   """
 
+  alias JidoSkill.Config.Settings
+
   @app :jido_skill
 
   @spec signal_bus_name() :: atom() | String.t()
@@ -43,9 +45,9 @@ defmodule JidoSkill.Config do
     ]
   end
 
-  @spec load_settings(keyword()) :: {:ok, JidoSkill.Config.Settings.t()} | {:error, term()}
+  @spec load_settings(keyword()) :: {:ok, Settings.t()} | {:error, term()}
   def load_settings(opts \\ []) do
-    JidoSkill.Config.Settings.load(opts)
+    Settings.load(opts)
   end
 
   defp default_signal_bus_middleware do

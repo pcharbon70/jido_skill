@@ -38,11 +38,13 @@ defmodule JidoSkill.Config.Settings do
     local_path = Keyword.get(opts, :local_settings_path, Config.settings_path())
 
     with {:ok, global_settings} <- read_json_if_exists(global_path),
-         {:ok, local_settings} <- read_json_if_exists(local_path),
-         merged <- deep_merge(default_settings(), deep_merge(global_settings, local_settings)),
-         :ok <- validate(merged),
-         {:ok, normalized} <- normalize(merged) do
-      {:ok, normalized}
+         {:ok, local_settings} <- read_json_if_exists(local_path) do
+      merged = deep_merge(default_settings(), deep_merge(global_settings, local_settings))
+
+      case validate(merged) do
+        :ok -> normalize(merged)
+        {:error, _reason} = error -> error
+      end
     end
   end
 
@@ -51,9 +53,8 @@ defmodule JidoSkill.Config.Settings do
     with :ok <- validate_allowed_keys(settings, @root_keys, :root),
          :ok <- validate_version(settings["version"]),
          :ok <- validate_signal_bus(settings["signal_bus"]),
-         :ok <- validate_permissions(settings["permissions"]),
-         :ok <- validate_hooks(settings["hooks"]) do
-      :ok
+         :ok <- validate_permissions(settings["permissions"]) do
+      validate_hooks(settings["hooks"])
     end
   end
 
@@ -88,9 +89,8 @@ defmodule JidoSkill.Config.Settings do
 
   defp validate_signal_bus(signal_bus) when is_map(signal_bus) do
     with :ok <- validate_allowed_keys(signal_bus, @signal_bus_keys, :signal_bus),
-         :ok <- validate_bus_name(signal_bus["name"]),
-         :ok <- validate_middleware(signal_bus["middleware"]) do
-      :ok
+         :ok <- validate_bus_name(signal_bus["name"]) do
+      validate_middleware(signal_bus["middleware"])
     end
   end
 
@@ -103,9 +103,8 @@ defmodule JidoSkill.Config.Settings do
 
     with :ok <- validate_allowed_keys(permissions, MapSet.to_list(allowed), :permissions),
          :ok <- validate_permission_list(permissions["allow"], :allow),
-         :ok <- validate_permission_list(permissions["deny"], :deny),
-         :ok <- validate_permission_list(permissions["ask"], :ask) do
-      :ok
+         :ok <- validate_permission_list(permissions["deny"], :deny) do
+      validate_permission_list(permissions["ask"], :ask)
     end
   end
 
@@ -126,9 +125,8 @@ defmodule JidoSkill.Config.Settings do
 
   defp validate_hooks(hooks) when is_map(hooks) do
     with :ok <- validate_allowed_keys(hooks, ["pre", "post"], :hooks),
-         :ok <- validate_hook(hooks["pre"], :pre),
-         :ok <- validate_hook(hooks["post"], :post) do
-      :ok
+         :ok <- validate_hook(hooks["pre"], :pre) do
+      validate_hook(hooks["post"], :post)
     end
   end
 
@@ -138,9 +136,8 @@ defmodule JidoSkill.Config.Settings do
     with :ok <- validate_allowed_keys(hook, @hook_keys, {:hook, key}),
          :ok <- validate_enabled(hook["enabled"], key),
          :ok <- validate_hook_signal_type(hook["signal_type"], key),
-         :ok <- validate_hook_bus(hook["bus"], key),
-         :ok <- validate_data_template(hook["data_template"], key) do
-      :ok
+         :ok <- validate_hook_bus(hook["bus"], key) do
+      validate_data_template(hook["data_template"], key)
     end
   end
 

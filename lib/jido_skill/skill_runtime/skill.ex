@@ -59,9 +59,8 @@ defmodule JidoSkill.SkillRuntime.Skill do
          {:ok, normalized} <- normalize_parsed(parsed),
          module_name <- module_name_from_path(path),
          :ok <- ensure_actions_loaded(normalized.actions),
-         :ok <- validate_router_actions(normalized.router, normalized.actions),
-         {:ok, compiled_module} <- compile_module(module_name, normalized, body) do
-      {:ok, compiled_module}
+         :ok <- validate_router_actions(normalized.router, normalized.actions) do
+      compile_module(module_name, normalized, body)
     end
   end
 
@@ -246,9 +245,8 @@ defmodule JidoSkill.SkillRuntime.Skill do
   defp validate_parsed(parsed) do
     with :ok <- required_string(parsed, "name"),
          :ok <- required_string(parsed, "description"),
-         :ok <- required_version(parsed["version"]),
-         :ok <- validate_jido(parsed["jido"]) do
-      :ok
+         :ok <- required_version(parsed["version"]) do
+      validate_jido(parsed["jido"])
     end
   end
 
@@ -416,10 +414,10 @@ defmodule JidoSkill.SkillRuntime.Skill do
         def actions, do: unquote(escaped_actions)
       end
 
-    case Module.create(module_name, quoted, Macro.Env.location(__ENV__)) do
-      {:module, module, _binary, _term} -> {:ok, module}
-      {:error, reason} -> {:error, {:module_compile_failed, reason}}
-    end
+    {:module, module, _binary, _term} =
+      Module.create(module_name, quoted, Macro.Env.location(__ENV__))
+
+    {:ok, module}
   rescue
     error -> {:error, {:module_compile_exception, error}}
   end
