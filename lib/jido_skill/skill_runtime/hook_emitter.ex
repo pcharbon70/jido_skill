@@ -174,9 +174,22 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
     do: skill_name |> to_string() |> String.trim_leading("Elixir.")
 
   defp normalize_bus_name(bus) when is_atom(bus), do: bus
-  defp normalize_bus_name(":" <> bus), do: bus
+
+  defp normalize_bus_name(":" <> bus) do
+    case safe_to_existing_atom(bus) do
+      {:ok, atom_bus} -> atom_bus
+      :error -> bus
+    end
+  end
+
   defp normalize_bus_name(bus), do: bus
 
   defp normalize_signal_type(nil), do: nil
   defp normalize_signal_type(type), do: String.replace(type, "/", ".")
+
+  defp safe_to_existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
+  end
 end

@@ -275,7 +275,14 @@ defmodule JidoSkill.Config.Settings do
   end
 
   defp normalize_bus_name(name) when is_atom(name), do: name
-  defp normalize_bus_name(":" <> bus_name), do: bus_name
+
+  defp normalize_bus_name(":" <> bus_name) do
+    case safe_to_existing_atom(bus_name) do
+      {:ok, atom_name} -> atom_name
+      :error -> bus_name
+    end
+  end
+
   defp normalize_bus_name(name), do: name
 
   defp normalize_opts(nil), do: []
@@ -351,4 +358,10 @@ defmodule JidoSkill.Config.Settings do
   end
 
   defp deep_merge(_left, right), do: right
+
+  defp safe_to_existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
+  end
 end

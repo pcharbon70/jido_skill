@@ -116,6 +116,40 @@ defmodule JidoSkill.Config.SettingsTest do
              Settings.load(global_settings_path: global_path, local_settings_path: local_path)
   end
 
+  test "normalizes colon-prefixed hook bus to existing atom" do
+    tmp_dir = tmp_dir()
+    global_path = Path.join(tmp_dir, "global-settings.json")
+    local_path = Path.join(tmp_dir, "local-settings.json")
+
+    settings_with_colon_bus = %{
+      "version" => "2.0.0",
+      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "permissions" => %{"allow" => [], "deny" => [], "ask" => []},
+      "hooks" => %{
+        "pre" => %{
+          "enabled" => true,
+          "signal_type" => "skill/pre",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        },
+        "post" => %{
+          "enabled" => true,
+          "signal_type" => "skill/post",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        }
+      }
+    }
+
+    File.write!(global_path, Jason.encode!(settings_with_colon_bus))
+
+    assert {:ok, settings} =
+             Settings.load(global_settings_path: global_path, local_settings_path: local_path)
+
+    assert settings.hooks.pre.bus == :jido_code_bus
+    assert settings.hooks.post.bus == :jido_code_bus
+  end
+
   defp tmp_dir do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_settings_#{suffix}")
