@@ -307,6 +307,108 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
              Skill.from_markdown(path)
   end
 
+  test "returns an error when skill_module points at an existing runtime module" do
+    tmp = tmp_dir("existing_runtime_module")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: existing-runtime-module
+      description: Should not override runtime modules
+      version: 1.0.0
+      jido:
+        skill_module: JidoSkill.SkillRuntime.Skill
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:error, {:skill_module_already_defined, JidoSkill.SkillRuntime.Skill}} =
+             Skill.from_markdown(path)
+  end
+
+  test "returns an error when explicit skill_module is reused by another source path" do
+    tmp = tmp_dir("skill_module_conflict")
+
+    shared_module_ref =
+      "JidoSkill.TestCompiledSkills.Conflict#{System.unique_integer([:positive])}"
+
+    shared_module = shared_module_ref |> String.split(".") |> Module.concat()
+    path_one = Path.join(tmp, "one_SKILL.md")
+    path_two = Path.join(tmp, "two_SKILL.md")
+
+    File.write!(
+      path_one,
+      """
+      ---
+      name: skill-module-conflict-one
+      description: First skill owns module
+      version: 1.0.0
+      jido:
+        skill_module: #{shared_module_ref}
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+      ---
+      """
+    )
+
+    File.write!(
+      path_two,
+      """
+      ---
+      name: skill-module-conflict-two
+      description: Second skill collides module
+      version: 1.0.0
+      jido:
+        skill_module: #{shared_module_ref}
+        actions:
+          - JidoSkill.TestActions.ExtractPdfTables
+        router:
+          - "pdf/extract/tables": ExtractPdfTables
+      ---
+      """
+    )
+
+    assert {:ok, ^shared_module} = Skill.from_markdown(path_one)
+
+    assert {:error, {:skill_module_conflict, ^shared_module, ^path_one}} =
+             Skill.from_markdown(path_two)
+  end
+
+  test "allows recompiling explicit skill_module from the same source path" do
+    tmp = tmp_dir("skill_module_recompile")
+    path = Path.join(tmp, "SKILL.md")
+    module_ref = "JidoSkill.TestCompiledSkills.Recompile#{System.unique_integer([:positive])}"
+    module = module_ref |> String.split(".") |> Module.concat()
+
+    File.write!(
+      path,
+      """
+      ---
+      name: skill-module-recompile
+      description: Recompiles from same source path
+      version: 1.0.0
+      jido:
+        skill_module: #{module_ref}
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:ok, ^module} = Skill.from_markdown(path)
+    assert {:ok, ^module} = Skill.from_markdown(path)
+  end
+
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_compiler_#{prefix}_#{suffix}")

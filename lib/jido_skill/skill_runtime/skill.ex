@@ -143,7 +143,7 @@ defmodule JidoSkill.SkillRuntime.Skill do
          {:ok, normalized} <- normalize_parsed(parsed),
          :ok <- ensure_actions_loaded(normalized.actions),
          :ok <- validate_router_actions(normalized.router, normalized.actions) do
-      compile_module(module_name, normalized, body)
+      compile_module(module_name, normalized, body, path)
     end
   end
 
@@ -660,47 +660,98 @@ defmodule JidoSkill.SkillRuntime.Skill do
     end
   end
 
-  defp compile_module(module_name, normalized, body) do
-    purge_module(module_name)
+  defp compile_module(module_name, normalized, body, source_path) do
+    with :ok <- purge_module(module_name, source_path) do
+      escaped_actions = Macro.escape(normalized.actions)
+      escaped_router = Macro.escape(normalized.router)
+      escaped_hooks = Macro.escape(normalized.hooks)
+      escaped_allowed_tools = Macro.escape(normalized.allowed_tools)
 
-    escaped_actions = Macro.escape(normalized.actions)
-    escaped_router = Macro.escape(normalized.router)
-    escaped_hooks = Macro.escape(normalized.hooks)
-    escaped_allowed_tools = Macro.escape(normalized.allowed_tools)
+      quoted =
+        quote do
+          use JidoSkill.SkillRuntime.Skill,
+            name: unquote(normalized.name),
+            description: unquote(normalized.description),
+            version: unquote(normalized.version),
+            actions: unquote(escaped_actions),
+            router: unquote(escaped_router),
+            hooks: unquote(escaped_hooks)
 
-    quoted =
-      quote do
-        use JidoSkill.SkillRuntime.Skill,
-          name: unquote(normalized.name),
-          description: unquote(normalized.description),
-          version: unquote(normalized.version),
-          actions: unquote(escaped_actions),
-          router: unquote(escaped_router),
-          hooks: unquote(escaped_hooks)
+          @allowed_tools unquote(escaped_allowed_tools)
+          @skill_body unquote(body)
+          @skill_source unquote(source_path)
 
-        @allowed_tools unquote(escaped_allowed_tools)
-        @skill_body unquote(body)
+          def skill_documentation, do: @skill_body
+          def allowed_tools, do: @allowed_tools
+          def actions, do: unquote(escaped_actions)
+          def __jido_skill_compiled__, do: true
+          def __jido_skill_source__, do: @skill_source
+        end
 
-        def skill_documentation, do: @skill_body
-        def allowed_tools, do: @allowed_tools
-        def actions, do: unquote(escaped_actions)
-      end
+      {:module, module, _binary, _term} =
+        Module.create(module_name, quoted, Macro.Env.location(__ENV__))
 
-    {:module, module, _binary, _term} =
-      Module.create(module_name, quoted, Macro.Env.location(__ENV__))
-
-    {:ok, module}
+      {:ok, module}
+    end
   rescue
     error -> {:error, {:module_compile_exception, error}}
   end
 
-  defp purge_module(module_name) do
+  defp purge_module(module_name, source_path) do
     if Code.ensure_loaded?(module_name) do
-      :code.purge(module_name)
-      :code.delete(module_name)
+      purge_loaded_module(module_name, source_path)
+    else
+      :ok
     end
+  end
 
+  defp purge_loaded_module(module_name, source_path) do
+    case compiled_module_source(module_name) do
+      {:ok, ^source_path} ->
+        purge_existing_module(module_name)
+
+      {:ok, existing_source} ->
+        {:error, {:skill_module_conflict, module_name, existing_source}}
+
+      :unknown ->
+        purge_unknown_loaded_module(module_name)
+    end
+  end
+
+  defp purge_unknown_loaded_module(module_name) do
+    if generated_module_name?(module_name) do
+      purge_existing_module(module_name)
+    else
+      {:error, {:skill_module_already_defined, module_name}}
+    end
+  end
+
+  defp purge_existing_module(module_name) do
+    :code.purge(module_name)
+    :code.delete(module_name)
     :ok
+  end
+
+  defp compiled_module_source(module_name) do
+    if function_exported?(module_name, :__jido_skill_compiled__, 0) and
+         function_exported?(module_name, :__jido_skill_source__, 0) and
+         module_name.__jido_skill_compiled__() == true do
+      {:ok, module_name.__jido_skill_source__()}
+    else
+      :unknown
+    end
+  rescue
+    _error ->
+      :unknown
+  catch
+    _kind, _reason ->
+      :unknown
+  end
+
+  defp generated_module_name?(module_name) when is_atom(module_name) do
+    module_name
+    |> Module.split()
+    |> Enum.take(2) == ["JidoSkill", "CompiledSkills"]
   end
 
   defp action_module_from_ref(action_ref) when is_binary(action_ref) do
