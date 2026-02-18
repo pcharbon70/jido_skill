@@ -43,6 +43,11 @@ defmodule JidoSkill.Config do
     ]
   end
 
+  @spec load_settings(keyword()) :: {:ok, JidoSkill.Config.Settings.t()} | {:error, term()}
+  def load_settings(opts \\ []) do
+    JidoSkill.Config.Settings.load(opts)
+  end
+
   defp default_signal_bus_middleware do
     [{Jido.Signal.Bus.Middleware.Logger, level: :debug}]
   end
