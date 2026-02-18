@@ -115,4 +115,30 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
     assert signal.data["source"] == "local"
     assert signal.data["route_template"] == "pdf/extract/tables"
   end
+
+  test "frontmatter colon-prefixed bus publishes to atom bus names" do
+    bus_name = :phase15_hook_bus
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.pre",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    frontmatter_hooks = %{
+      pre: %{
+        enabled: true,
+        signal_type: "skill/pre",
+        bus: ":phase15_hook_bus",
+        data: %{"origin" => "frontmatter"}
+      }
+    }
+
+    assert :ok = HookEmitter.emit_pre("pdf-processor", "pdf/extract/text", frontmatter_hooks, %{})
+
+    assert_receive {:signal, signal}, 1_000
+    assert signal.type == "skill.pre"
+    assert signal.data["origin"] == "frontmatter"
+    assert signal.data["skill_name"] == "pdf-processor"
+  end
 end
