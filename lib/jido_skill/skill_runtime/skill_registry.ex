@@ -10,6 +10,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
   alias Jido.Signal
   alias Jido.Signal.Bus
+  alias JidoSkill.SkillRuntime.Skill
 
   require Logger
 
@@ -188,59 +189,26 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   end
 
   defp parse_skill_file(path, scope, loaded_at) do
-    with {:ok, content} <- File.read(path),
-         {:ok, frontmatter} <- parse_frontmatter(content),
-         {:ok, name} <- required_field(frontmatter, "name") do
+    with {:ok, module} <- Skill.from_markdown(path),
+         metadata <- module.skill_metadata(),
+         {:ok, name} <- required_metadata_field(metadata, :name) do
       {:ok,
        %{
          name: name,
-         description: Map.get(frontmatter, "description"),
-         version: Map.get(frontmatter, "version"),
+         description: Map.get(metadata, :description),
+         version: Map.get(metadata, :version),
          path: path,
          scope: scope,
-         module: nil,
+         module: module,
          loaded_at: loaded_at
        }}
     end
   end
 
-  defp parse_frontmatter(content) do
-    case Regex.named_captures(~r/\A---\s*\n(?<frontmatter>.*?)\n---\s*(?:\n|$)/s, content) do
-      %{"frontmatter" => frontmatter} ->
-        {:ok, parse_frontmatter_lines(frontmatter)}
-
-      _ ->
-        {:error, :missing_frontmatter}
-    end
-  end
-
-  defp parse_frontmatter_lines(frontmatter) do
-    frontmatter
-    |> String.split("\n")
-    |> Enum.reduce(%{}, fn line, acc ->
-      case Regex.run(~r/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/, line, capture: :all_but_first) do
-        [key, value] ->
-          Map.put(acc, key, strip_quotes(value))
-
-        _ ->
-          acc
-      end
-    end)
-  end
-
-  defp strip_quotes(value) do
-    value
-    |> String.trim()
-    |> String.trim_leading("\"")
-    |> String.trim_trailing("\"")
-    |> String.trim_leading("'")
-    |> String.trim_trailing("'")
-  end
-
-  defp required_field(frontmatter, key) do
-    case Map.get(frontmatter, key) do
-      nil -> {:error, {:missing_required_field, key}}
-      "" -> {:error, {:missing_required_field, key}}
+  defp required_metadata_field(metadata, key) do
+    case Map.get(metadata, key) do
+      nil -> {:error, {:missing_required_metadata_field, key}}
+      "" -> {:error, {:missing_required_metadata_field, key}}
       value -> {:ok, value}
     end
   end

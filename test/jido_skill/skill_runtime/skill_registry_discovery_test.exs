@@ -1,3 +1,6 @@
+defmodule JidoSkill.TestActions.DiscoveryAction do
+end
+
 defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
   use ExUnit.Case, async: false
 
@@ -91,6 +94,11 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     name: #{skill_name}
     description: #{description}
     version: #{version}
+    jido:
+      actions:
+        - JidoSkill.TestActions.DiscoveryAction
+      router:
+        - "skill/#{skill_name}/run": DiscoveryAction
     ---
 
     # #{skill_name}
