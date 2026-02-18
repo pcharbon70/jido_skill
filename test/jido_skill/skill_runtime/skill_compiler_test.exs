@@ -165,6 +165,33 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     assert {:error, {:invalid_router_path, "pdf/Extract/Text"}} = Skill.from_markdown(path)
   end
 
+  test "accepts router paths with hyphenated segments" do
+    tmp = tmp_dir("hyphen_router_path")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: hyphen-router
+      description: Supports hyphenated route segments
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract-text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:ok, module} = Skill.from_markdown(path)
+
+    assert module.skill_metadata().router == [
+             {"pdf/extract-text", JidoSkill.TestActions.ExtractPdfText}
+           ]
+  end
+
   test "returns an error when hook contains unknown keys" do
     tmp = tmp_dir("unknown_hook_key")
     path = Path.join(tmp, "SKILL.md")
