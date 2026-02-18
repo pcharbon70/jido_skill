@@ -139,8 +139,8 @@ defmodule JidoSkill.SkillRuntime.Skill do
          {:ok, frontmatter, body} <- split_frontmatter(content),
          {:ok, parsed} <- parse_frontmatter(frontmatter),
          :ok <- validate_parsed(parsed),
+         {:ok, module_name} <- resolve_module_name(parsed, path),
          {:ok, normalized} <- normalize_parsed(parsed),
-         module_name <- module_name_from_path(path),
          :ok <- ensure_actions_loaded(normalized.actions),
          :ok <- validate_router_actions(normalized.router, normalized.actions) do
       compile_module(module_name, normalized, body)
@@ -353,6 +353,7 @@ defmodule JidoSkill.SkillRuntime.Skill do
 
   defp validate_jido_details(jido, actions, router, hooks) do
     with :ok <- validate_allowed_jido_keys(jido),
+         :ok <- validate_skill_module(Map.get(jido, "skill_module")),
          :ok <- validate_actions(actions),
          :ok <- validate_router(router) do
       validate_hooks_config(hooks)
@@ -384,6 +385,18 @@ defmodule JidoSkill.SkillRuntime.Skill do
       entries -> {:error, {:invalid_action_entries, entries}}
     end
   end
+
+  defp validate_skill_module(nil), do: :ok
+
+  defp validate_skill_module(value) when is_binary(value) do
+    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_.]*$/, value) do
+      :ok
+    else
+      {:error, {:invalid_skill_module, value}}
+    end
+  end
+
+  defp validate_skill_module(value), do: {:error, {:invalid_skill_module, value}}
 
   defp validate_router(router) do
     result =
@@ -713,6 +726,33 @@ defmodule JidoSkill.SkillRuntime.Skill do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
+
+  defp resolve_module_name(parsed, path) do
+    case get_in(parsed, ["jido", "skill_module"]) do
+      nil ->
+        {:ok, module_name_from_path(path)}
+
+      skill_module ->
+        skill_module_from_ref(skill_module)
+    end
+  end
+
+  defp skill_module_from_ref(skill_module) when is_binary(skill_module) do
+    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_.]*$/, skill_module) do
+      module =
+        skill_module
+        |> String.trim()
+        |> String.trim_leading("Elixir.")
+        |> String.split(".")
+        |> Module.concat()
+
+      {:ok, module}
+    else
+      {:error, {:invalid_skill_module, skill_module}}
+    end
+  end
+
+  defp skill_module_from_ref(skill_module), do: {:error, {:invalid_skill_module, skill_module}}
 
   defp module_name_from_path(path) do
     hash =
