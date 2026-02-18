@@ -229,12 +229,16 @@ defmodule JidoSkill.SkillRuntime.Skill do
     do: {:ok, %{state | mode: :hooks, hook_name: nil, in_data: false}}
 
   defp parse_jido_line(line, state) do
-    case Regex.run(~r/^  (skill_module):\s*(.*?)\s*$/, line, capture: :all_but_first) do
-      [key, value] ->
-        {:ok, %{state | jido: Map.put(state.jido, key, strip_quotes(value)), mode: :jido}}
+    case Regex.run(~r/^  ([A-Za-z0-9_]+):\s*(.*?)\s*$/, line, capture: :all_but_first) do
+      ["skill_module", value] ->
+        {:ok,
+         %{state | jido: Map.put(state.jido, "skill_module", strip_quotes(value)), mode: :jido}}
+
+      [key, _value] ->
+        {:error, {:unknown_jido_key, key}}
 
       _ ->
-        {:ok, state}
+        {:error, {:invalid_jido_line, line}}
     end
   end
 
@@ -338,13 +342,185 @@ defmodule JidoSkill.SkillRuntime.Skill do
   defp validate_jido(jido) do
     actions = Map.get(jido, "actions", [])
     router = Map.get(jido, "router", [])
+    hooks = Map.get(jido, "hooks", %{})
 
     cond do
       not is_list(actions) or actions == [] -> {:error, :missing_actions}
       not is_list(router) or router == [] -> {:error, :missing_router}
-      true -> :ok
+      true -> validate_jido_details(jido, actions, router, hooks)
     end
   end
+
+  defp validate_jido_details(jido, actions, router, hooks) do
+    with :ok <- validate_allowed_jido_keys(jido),
+         :ok <- validate_actions(actions),
+         :ok <- validate_router(router) do
+      validate_hooks_config(hooks)
+    end
+  end
+
+  defp validate_allowed_jido_keys(jido) do
+    allowed = MapSet.new(["skill_module", "actions", "router", "hooks"])
+
+    unknown_keys =
+      jido
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(allowed, &1))
+
+    case unknown_keys do
+      [] -> :ok
+      keys -> {:error, {:unknown_jido_keys, keys}}
+    end
+  end
+
+  defp validate_actions(actions) do
+    invalid =
+      Enum.reject(actions, fn action ->
+        is_binary(action) and Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_.]*$/, action)
+      end)
+
+    case invalid do
+      [] -> :ok
+      entries -> {:error, {:invalid_action_entries, entries}}
+    end
+  end
+
+  defp validate_router(router) do
+    result =
+      Enum.reduce_while(router, :ok, fn entry, :ok ->
+        case validate_router_entry(entry) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+
+    case result do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_router_entry({path, action_ref}) do
+    cond do
+      not (is_binary(path) and Regex.match?(~r/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/, path)) ->
+        {:error, {:invalid_router_path, path}}
+
+      not (is_binary(action_ref) and Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_.]*$/, action_ref)) ->
+        {:error, {:invalid_router_action_ref, action_ref}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_router_entry(other), do: {:error, {:invalid_router_entry, other}}
+
+  defp validate_hooks_config(hooks) when hooks in [%{}, nil], do: :ok
+
+  defp validate_hooks_config(hooks) when is_map(hooks) do
+    with :ok <- validate_hook_names(hooks) do
+      validate_hook_entries(hooks)
+    end
+  end
+
+  defp validate_hooks_config(other), do: {:error, {:invalid_hooks_config, other}}
+
+  defp validate_hook_names(hooks) do
+    allowed = MapSet.new(["pre", "post"])
+
+    unknown =
+      hooks
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(allowed, &1))
+
+    case unknown do
+      [] -> :ok
+      keys -> {:error, {:unknown_hook_names, keys}}
+    end
+  end
+
+  defp validate_hook_entries(hooks) do
+    hooks
+    |> Enum.reduce_while(:ok, fn {name, hook}, :ok ->
+      case validate_hook_entry(name, hook) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_hook_entry(name, hook) when is_map(hook) do
+    with :ok <- validate_hook_keys(name, hook),
+         :ok <- validate_hook_enabled(name, Map.get(hook, "enabled")),
+         :ok <- validate_hook_signal_type(name, Map.get(hook, "signal_type")),
+         :ok <- validate_hook_bus(name, Map.get(hook, "bus")) do
+      validate_hook_data(name, Map.get(hook, "data"))
+    end
+  end
+
+  defp validate_hook_entry(name, hook), do: {:error, {:invalid_hook_config, name, hook}}
+
+  defp validate_hook_keys(name, hook) do
+    allowed = MapSet.new(["enabled", "signal_type", "bus", "data"])
+
+    unknown =
+      hook
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(allowed, &1))
+
+    case unknown do
+      [] -> :ok
+      keys -> {:error, {:unknown_hook_keys, name, keys}}
+    end
+  end
+
+  defp validate_hook_enabled(_name, nil), do: :ok
+  defp validate_hook_enabled(_name, value) when is_boolean(value), do: :ok
+  defp validate_hook_enabled(name, value), do: {:error, {:invalid_hook_enabled, name, value}}
+
+  defp validate_hook_signal_type(_name, nil), do: :ok
+
+  defp validate_hook_signal_type(_name, value) when is_binary(value) do
+    if Regex.match?(~r/^[a-z0-9_]+(?:\/[a-z0-9_]+)*$/, value) do
+      :ok
+    else
+      {:error, {:invalid_hook_signal_type, value}}
+    end
+  end
+
+  defp validate_hook_signal_type(name, value),
+    do: {:error, {:invalid_hook_signal_type, name, value}}
+
+  defp validate_hook_bus(_name, nil), do: :ok
+  defp validate_hook_bus(_name, value) when is_atom(value), do: :ok
+
+  defp validate_hook_bus(_name, value) when is_binary(value) do
+    if Regex.match?(~r/^:?[A-Za-z_][A-Za-z0-9_]*$/, value) do
+      :ok
+    else
+      {:error, {:invalid_hook_bus, value}}
+    end
+  end
+
+  defp validate_hook_bus(name, value), do: {:error, {:invalid_hook_bus, name, value}}
+
+  defp validate_hook_data(_name, nil), do: :ok
+
+  defp validate_hook_data(_name, data) when is_map(data) do
+    if Enum.all?(data, fn {_key, value} ->
+         is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value)
+       end) do
+      :ok
+    else
+      {:error, :invalid_hook_data}
+    end
+  end
+
+  defp validate_hook_data(name, value), do: {:error, {:invalid_hook_data, name, value}}
 
   defp required_string(map, key) do
     case Map.get(map, key) do
