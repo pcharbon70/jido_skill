@@ -255,6 +255,58 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     assert metadata.hooks.pre.data == %{"source" => "frontmatter"}
   end
 
+  test "uses jido skill_module override when provided" do
+    tmp = tmp_dir("skill_module_override")
+    path = Path.join(tmp, "SKILL.md")
+
+    module_ref = "JidoSkill.TestCompiledSkills.Skill#{System.unique_integer([:positive])}"
+    module = module_ref |> String.split(".") |> Module.concat()
+
+    File.write!(
+      path,
+      """
+      ---
+      name: module-override
+      description: Uses explicit skill module
+      version: 1.0.0
+      jido:
+        skill_module: #{module_ref}
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:ok, ^module} = Skill.from_markdown(path)
+  end
+
+  test "returns an error when skill_module format is invalid" do
+    tmp = tmp_dir("invalid_skill_module")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: invalid-skill-module
+      description: Invalid skill module format
+      version: 1.0.0
+      jido:
+        skill_module: "JidoSkill.Invalid-Module"
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:error, {:invalid_skill_module, "JidoSkill.Invalid-Module"}} =
+             Skill.from_markdown(path)
+  end
+
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_compiler_#{prefix}_#{suffix}")
