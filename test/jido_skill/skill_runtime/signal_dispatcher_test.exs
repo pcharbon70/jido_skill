@@ -44,7 +44,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
            bus_name: bus_name,
            global_path: global_root,
            local_path: local_root,
-           hook_defaults: hook_defaults(bus_name)
+           hook_defaults: hook_defaults(bus_name),
+           permissions: default_permissions()
          ]}
       )
 
@@ -99,7 +100,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
            bus_name: bus_name,
            global_path: global_root,
            local_path: local_root,
-           hook_defaults: hook_defaults(bus_name)
+           hook_defaults: hook_defaults(bus_name),
+           permissions: default_permissions()
          ]}
       )
 
@@ -109,9 +111,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert SignalDispatcher.routes(dispatcher) == ["demo.one"]
 
     {:ok, non_matching_signal} =
-      Signal.new("demo.two", %{"value" => "before_reload"},
-        source: "/test/signal"
-      )
+      Signal.new("demo.two", %{"value" => "before_reload"}, source: "/test/signal")
 
     assert {:ok, _recorded} = Bus.publish(bus_name, [non_matching_signal])
     refute_receive {:action_ran, "before_reload"}, 200
@@ -124,23 +124,59 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     end)
 
     {:ok, matching_signal} =
-      Signal.new("demo.two", %{"value" => "after_reload"},
-        source: "/test/signal"
-      )
+      Signal.new("demo.two", %{"value" => "after_reload"}, source: "/test/signal")
 
     assert {:ok, _recorded} = Bus.publish(bus_name, [matching_signal])
     assert_receive {:action_ran, "after_reload"}, 1_000
   end
 
-  defp create_skill(root, skill_name, route, bus_name) do
+  test "skips execution when skill permission status requires ask approval" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_permissions")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    create_skill(local_root, "dispatcher-ask", "demo/ask", bus_name, allowed_tools: "Bash(git:*)")
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: hook_defaults(bus_name),
+           permissions: %{"allow" => [], "deny" => [], "ask" => ["Bash(git:*)"]}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.ask"]
+
+    {:ok, signal} = Signal.new("demo.ask", %{"value" => "blocked"}, source: "/test/permissions")
+    assert {:ok, _recorded} = Bus.publish(bus_name, [signal])
+
+    refute_receive {:action_ran, "blocked"}, 300
+  end
+
+  defp create_skill(root, skill_name, route, bus_name, opts \\ []) do
     skill_dir = Path.join([root, "skills", skill_name])
     File.mkdir_p!(skill_dir)
+    allowed_tools = Keyword.get(opts, :allowed_tools)
 
     content = """
     ---
     name: #{skill_name}
     description: Dispatcher test skill #{skill_name}
     version: 1.0.0
+    #{allowed_tools_line(allowed_tools)}
     jido:
       actions:
         - JidoSkill.DispatcherTestActions.Notify
@@ -181,6 +217,10 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     }
   end
 
+  defp default_permissions do
+    %{"allow" => [], "deny" => [], "ask" => []}
+  end
+
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_#{prefix}_#{suffix}")
@@ -208,4 +248,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       :persistent_term.erase({JidoSkill.DispatcherTestActions.Notify, :notify_pid})
     end)
   end
+
+  defp allowed_tools_line(nil), do: ""
+  defp allowed_tools_line(value), do: "allowed-tools: #{value}"
 end

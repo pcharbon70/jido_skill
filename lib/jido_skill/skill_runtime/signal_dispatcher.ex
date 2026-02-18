@@ -264,6 +264,27 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     module = Map.get(skill, :module)
     skill_name = Map.get(skill, :name, inspect(module))
 
+    case permission_status(skill) do
+      :allowed ->
+        dispatch_allowed_skill(module, skill_name, signal, global_hooks, bus_name)
+
+      {:ask, tools} ->
+        Logger.warning(
+          "skill #{skill_name} requires approval for tools #{inspect(tools)}; skipping signal #{signal.type}"
+        )
+
+        :skip
+
+      {:denied, tools} ->
+        Logger.warning(
+          "skill #{skill_name} denied by permissions for tools #{inspect(tools)}; skipping signal #{signal.type}"
+        )
+
+        :skip
+    end
+  end
+
+  defp dispatch_allowed_skill(module, skill_name, signal, global_hooks, bus_name) do
     case safe_handle_signal(module, signal, global_hooks) do
       {:ok, %Instruction{} = instruction} ->
         result = Jido.Exec.run(instruction)
@@ -287,6 +308,10 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
         :skip
     end
+  end
+
+  defp permission_status(skill) do
+    Map.get(skill, :permission_status, :allowed)
   end
 
   defp safe_handle_signal(module, signal, global_hooks) when is_atom(module) do
