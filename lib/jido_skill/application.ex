@@ -23,6 +23,7 @@ defmodule JidoSkill.Application do
              settings_path: JidoSkill.Config.settings_path(),
              hook_defaults: settings.hooks
            ]},
+          {JidoSkill.SkillRuntime.SignalDispatcher, [bus_name: bus_name]},
           {JidoSkill.Observability.SkillLifecycleSubscriber, [bus_name: bus_name]}
         ]
 

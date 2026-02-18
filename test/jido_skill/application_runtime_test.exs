@@ -4,6 +4,7 @@ defmodule JidoSkill.ApplicationRuntimeTest do
   alias Jido.Signal.Bus
   alias JidoSkill.Config
   alias JidoSkill.Observability.SkillLifecycleSubscriber
+  alias JidoSkill.SkillRuntime.SignalDispatcher
   alias JidoSkill.SkillRuntime.SkillRegistry
 
   test "starts the phase 1 runtime children" do
@@ -15,6 +16,9 @@ defmodule JidoSkill.ApplicationRuntimeTest do
 
     assert registry_pid = Process.whereis(SkillRegistry)
     assert Process.alive?(registry_pid)
+
+    assert dispatcher_pid = Process.whereis(SignalDispatcher)
+    assert Process.alive?(dispatcher_pid)
 
     assert subscriber_pid = Process.whereis(SkillLifecycleSubscriber)
     assert Process.alive?(subscriber_pid)
