@@ -1,8 +1,8 @@
-# JidoCode Skill Extensibility System Design (Jido v2)
+# JidoCode Skill System Design (Jido v2)
 
 **A signal-first skill architecture based on Jido v2 primitives**
 
-JidoCode can implement extensibility with a narrow, predictable surface area centered on `Jido.Skill`, `Jido.Action`, and `JidoSignal.Bus`. This design intentionally removes extra entrypoint-specific abstractions. Hook behavior is retained only as optional pre/post signal emission configured in skill frontmatter.
+JidoCode can implement a narrow, predictable skill runtime centered on `Jido.Skill`, `Jido.Action`, and `JidoSignal.Bus`. Hook behavior is retained only as optional pre/post signal emission configured in skill frontmatter.
 
 > **Jido v2 Architecture Note**: Jido v2 exposes modular dependencies (`jido`, `jido_action`, `jido_signal`) and path-based signal routing with CloudEvents-compliant envelopes.
 
@@ -14,12 +14,11 @@ The skill runtime is built from three primitives:
 - **Signals** (`jido_signal`): CloudEvents-compliant pub/sub for lifecycle and hook emission.
 - **Skills** (`jido`): action composition with route-based dispatch.
 
-| Extensibility Component | Jido v2 Primitive | Implementation Pattern |
-|-------------------------|-------------------|------------------------|
+| Runtime Component | Jido v2 Primitive | Implementation Pattern |
+|-------------------|-------------------|------------------------|
 | Skill definitions | `Jido.Skill` | Markdown + frontmatter + compiled module |
 | Skill operations | `Jido.Action` | Zoi-validated action execution |
 | Hook lifecycle | `JidoSignal.Signal` + `JidoSignal.Bus` | Optional `pre`/`post` signals around skill execution |
-| Extensions | Supervision tree + runtime registration | OTP-supervised extension containers |
 
 ## Jido v2 dependency structure
 
@@ -41,10 +40,6 @@ The configuration model keeps global and project-local layers, with local values
 │   └── skill-name/
 │       ├── SKILL.md
 │       └── scripts/
-├── extensions/                        # Installed extensions
-│   └── extension-name/
-│       └── .jido-extension/
-│           └── extension.json
 └── logs/
 
 .jido_code/                            # Project-level configuration
@@ -53,7 +48,6 @@ The configuration model keeps global and project-local layers, with local values
 ├── skills/
 │   └── skill-name/
 │       └── SKILL.md
-└── extensions/
 ```
 
 ## JSON configuration schema (bus-first)
@@ -103,17 +97,6 @@ The configuration model keeps global and project-local layers, with local values
         "route": "{{route}}",
         "status": "{{status}}",
         "timestamp": "{{timestamp}}"
-      }
-    }
-  },
-
-  "extensions": {
-    "enabled": ["pdf-tools", "code-quality"],
-    "disabled": [],
-    "marketplaces": {
-      "community": {
-        "source": "github",
-        "repo": "jidocode/extension-marketplace"
       }
     }
   }
@@ -204,58 +187,15 @@ When both global and frontmatter hook configs exist:
 3. `enabled: false` in frontmatter disables that hook for the skill.
 4. If both are absent, no hook signals are emitted.
 
-## Extension manifest
-
-```json
-{
-  "$schema": "https://jidocode.dev/schemas/extension.json",
-  "name": "code-quality",
-  "version": "2.1.0",
-  "description": "Skill bundle for linting and security analysis",
-  "author": {
-    "name": "JidoCode Community",
-    "email": "extensions@jidocode.dev"
-  },
-  "license": "MIT",
-  "repository": "https://github.com/jidocode/extension-code-quality",
-  "keywords": ["skills", "linting", "security"],
-
-  "elixir": {
-    "application": "JidoCodeQuality",
-    "mix_deps": [
-      {"jido", "~> 2.0"},
-      {"jido_signal", "~> 1.2"},
-      {"jido_action", "~> 1.0"},
-      {"credo", "~> 1.7"},
-      {"sobelow", "~> 0.13"}
-    ]
-  },
-
-  "skills": "./skills",
-
-  "signals": {
-    "emits": [
-      "skill/pre",
-      "skill/post",
-      "skill/result"
-    ],
-    "subscribes": [
-      "file/saved",
-      "repo/changed"
-    ]
-  }
-}
-```
-
 ## Elixir code architecture using Jido v2 patterns
 
-### Core extension registry and loader
+### Core skill registry and loader
 
 ```elixir
-defmodule JidoCode.Extensibility.ExtensionRegistry do
+defmodule JidoCode.SkillRuntime.SkillRegistry do
   @moduledoc """
-  Registry for loaded extensions and skills.
-  Uses the signal bus for extension lifecycle emission.
+  Registry for loaded skills and global hook defaults.
+  Uses the signal bus for registry update notifications.
   """
 
   use GenServer
@@ -263,8 +203,8 @@ defmodule JidoCode.Extensibility.ExtensionRegistry do
   alias JidoSignal.Signal
   alias JidoSignal.Bus
 
-  defstruct extensions: %{},
-            skills: %{},
+  defstruct skills: %{},
+            skill_paths: [],
             hook_defaults: %{}
 
   def start_link(opts) do
@@ -272,46 +212,17 @@ defmodule JidoCode.Extensibility.ExtensionRegistry do
   end
 
   def init(opts) do
-    Bus.subscribe(:jido_code_bus, "extension/created", dispatch: {:pid, target: self()})
-
     state = %__MODULE__{
-      hook_defaults: load_hook_defaults(opts[:settings_path])
+      hook_defaults: load_hook_defaults(opts[:settings_path]),
+      skill_paths: skill_paths(opts)
     }
 
-    {:ok, load_all_extensions(state, opts)}
-  end
-
-  def register_extension(manifest) do
-    GenServer.call(__MODULE__, {:register_extension, manifest})
+    {:ok, load_all_skills(state)}
   end
 
   def get_skill(name), do: GenServer.call(__MODULE__, {:get_skill, name})
   def hook_defaults, do: GenServer.call(__MODULE__, :hook_defaults)
-
-  def handle_call({:register_extension, manifest}, _from, state) do
-    extension = load_extension_from_manifest(manifest)
-
-    {:ok, signal} =
-      Signal.new(
-        "extension/loaded",
-        %{
-          extension_name: manifest.name,
-          version: manifest.version,
-          capabilities: extract_capabilities(extension)
-        },
-        source: "/extensions/#{manifest.name}"
-      )
-
-    Bus.publish(:jido_code_bus, [signal])
-
-    new_state = %{
-      state
-      | extensions: Map.put(state.extensions, manifest.name, extension),
-        skills: Map.merge(state.skills, extension.skills)
-    }
-
-    {:reply, {:ok, extension}, new_state}
-  end
+  def reload, do: GenServer.call(__MODULE__, :reload)
 
   def handle_call({:get_skill, name}, _from, state) do
     {:reply, Map.get(state.skills, name), state}
@@ -320,13 +231,44 @@ defmodule JidoCode.Extensibility.ExtensionRegistry do
   def handle_call(:hook_defaults, _from, state) do
     {:reply, state.hook_defaults, state}
   end
+
+  def handle_call(:reload, _from, state) do
+    new_state = load_all_skills(%{state | skills: %{}})
+    publish_registry_update(new_state.skills)
+    {:reply, :ok, new_state}
+  end
+
+  defp skill_paths(opts) do
+    [opts[:global_path], opts[:local_path]]
+    |> Enum.map(&Path.join(&1, "skills"))
+  end
+
+  defp load_all_skills(state) do
+    loaded_skills =
+      state.skill_paths
+      |> Enum.flat_map(&load_skills_from_path/1)
+      |> Map.new(fn {name, module} -> {name, module} end)
+
+    %{state | skills: loaded_skills}
+  end
+
+  defp publish_registry_update(skills) do
+    {:ok, signal} =
+      Signal.new(
+        "skill/registry/updated",
+        %{skills: Map.keys(skills), count: map_size(skills)},
+        source: "/skill_registry"
+      )
+
+    Bus.publish(:jido_code_bus, [signal])
+  end
 end
 ```
 
 ### Signal-only hook emitter
 
 ```elixir
-defmodule JidoCode.Extensibility.HookEmitter do
+defmodule JidoCode.SkillRuntime.HookEmitter do
   @moduledoc """
   Emits optional pre/post skill lifecycle signals.
   No other hook types are supported.
@@ -410,7 +352,7 @@ end
 ### Skill implementation with route dispatch + pre/post hooks
 
 ```elixir
-defmodule JidoCode.Extensibility.Skill do
+defmodule JidoCode.SkillRuntime.Skill do
   @moduledoc """
   Skill wrapper that emits optional pre/post lifecycle signals.
   """
@@ -448,7 +390,7 @@ defmodule JidoCode.Extensibility.Skill do
             {:skip, signal}
 
           action ->
-            JidoCode.Extensibility.HookEmitter.emit_pre(
+            JidoCode.SkillRuntime.HookEmitter.emit_pre(
               __MODULE__,
               signal.type,
               @hook_config,
@@ -470,7 +412,7 @@ defmodule JidoCode.Extensibility.Skill do
             _ -> "ok"
           end
 
-        JidoCode.Extensibility.HookEmitter.emit_post(
+        JidoCode.SkillRuntime.HookEmitter.emit_post(
           __MODULE__,
           action_to_route(action),
           status,
@@ -498,7 +440,7 @@ defmodule JidoCode.Extensibility.Skill do
     Module.create(
       module_name,
       quote do
-        use JidoCode.Extensibility.Skill,
+        use JidoCode.SkillRuntime.Skill,
           name: unquote(frontmatter["name"]),
           description: unquote(frontmatter["description"]),
           version: unquote(frontmatter["version"]),
@@ -592,7 +534,7 @@ defmodule JidoCode.Application do
          ]
        ]},
 
-      {JidoCode.Extensibility.ExtensionRegistry,
+      {JidoCode.SkillRuntime.SkillRegistry,
        [
          global_path: Path.expand("~/.jido_code"),
          local_path: ".jido_code"
@@ -608,7 +550,7 @@ end
 
 ## Summary of key integration points
 
-This design keeps extensibility intentionally small:
+This design keeps the runtime intentionally small:
 
 - **Skills** remain markdown-defined and compile into `Jido.Skill` modules.
 - **Hooks** are only optional `pre` and `post` signal emissions.
@@ -620,7 +562,7 @@ This gives a stable integration model with clear lifecycle semantics and consist
 
 | Aspect | Jido v1 | Jido v2 |
 |--------|---------|---------|
-| Signal routing | Pattern-based (`"extension.**"`) | Path-based (`"extension/loaded"`) |
+| Signal routing | Pattern-based (`"skill.**"`) | Path-based (`"skill/registry/updated"`) |
 | Schema system | NimbleOptions | Zoi schemas |
 | Dependency model | Monolithic `jido` | Modular (`jido`, `jido_action`, `jido_signal`) |
 | Signal envelope | Custom format | CloudEvents v1.0.2 compliant |
