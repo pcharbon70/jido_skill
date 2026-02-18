@@ -222,6 +222,39 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     assert {:error, {:invalid_hook_signal_type, "Skill/Post"}} = Skill.from_markdown(path)
   end
 
+  test "preserves missing hook fields for runtime global fallback" do
+    tmp = tmp_dir("hook_fallback_fields")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: hook-fallback
+      description: Hook fallback test
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+        hooks:
+          pre:
+            data:
+              source: "frontmatter"
+      ---
+      """
+    )
+
+    assert {:ok, module} = Skill.from_markdown(path)
+    metadata = module.skill_metadata()
+
+    assert metadata.hooks.pre.enabled == nil
+    assert metadata.hooks.pre.signal_type == nil
+    assert metadata.hooks.pre.bus == nil
+    assert metadata.hooks.pre.data == %{"source" => "frontmatter"}
+  end
+
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_compiler_#{prefix}_#{suffix}")
