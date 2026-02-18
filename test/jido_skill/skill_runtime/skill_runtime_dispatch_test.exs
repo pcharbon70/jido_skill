@@ -175,6 +175,53 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
     assert emitted.data["skill_name"] == "dispatch-global-hooks"
   end
 
+  test "frontmatter partial hook inherits global bus and signal type" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    subscribe!(bus_name, "skill.global_pre")
+
+    path =
+      write_skill_markdown(
+        "dispatch_frontmatter_fallback",
+        """
+        name: dispatch-frontmatter-fallback
+        description: Frontmatter partial hook should inherit global fields
+        version: 1.0.0
+        jido:
+          actions:
+            - JidoSkill.RuntimeDispatchActions.ExtractText
+          router:
+            - "pdf/extract/text": ExtractText
+          hooks:
+            pre:
+              data:
+                origin: "frontmatter"
+        """
+      )
+
+    global_hooks = %{
+      pre: %{
+        enabled: true,
+        signal_type: "skill/global_pre",
+        bus: bus_name,
+        data: %{"origin" => "global", "scope" => "global"}
+      }
+    }
+
+    assert {:ok, module} = Skill.from_markdown(path)
+    {:ok, signal} = Signal.new("pdf.extract.text", %{}, source: "/tests")
+
+    assert {:ok, _instruction} = module.handle_signal(signal, global_hooks: global_hooks)
+
+    assert_receive {:signal, emitted}, 1_000
+    assert emitted.type == "skill.global_pre"
+    assert emitted.data["origin"] == "frontmatter"
+    assert emitted.data["scope"] == "global"
+    assert emitted.data["skill_name"] == "dispatch-frontmatter-fallback"
+    assert emitted.data["route"] == "pdf/extract/text"
+  end
+
   defp subscribe!(bus_name, signal_type) do
     assert {:ok, _subscription_id} =
              Bus.subscribe(bus_name, signal_type,

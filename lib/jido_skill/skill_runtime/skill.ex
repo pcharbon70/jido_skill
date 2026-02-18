@@ -617,9 +617,9 @@ defmodule JidoSkill.SkillRuntime.Skill do
 
   defp normalize_hook(hook) do
     %{
-      enabled: Map.get(hook, "enabled", true),
+      enabled: Map.get(hook, "enabled"),
       signal_type: Map.get(hook, "signal_type"),
-      bus: Map.get(hook, "bus", ":jido_code_bus"),
+      bus: Map.get(hook, "bus"),
       data: Map.get(hook, "data", %{})
     }
   end
