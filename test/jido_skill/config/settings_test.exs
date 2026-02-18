@@ -117,9 +117,10 @@ defmodule JidoSkill.Config.SettingsTest do
   end
 
   defp tmp_dir do
-    path =
-      Path.join(System.tmp_dir!(), "jido_skill_settings_#{System.unique_integer([:positive])}")
+    suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+    path = Path.join(System.tmp_dir!(), "jido_skill_settings_#{suffix}")
 
+    File.rm_rf!(path)
     File.mkdir_p!(path)
     path
   end
