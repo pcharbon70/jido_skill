@@ -7,6 +7,9 @@ defmodule JidoSkill.MixProject do
       version: "0.1.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      dialyzer: [
+        flags: [:error_handling, :underspecs, :unknown, :unmatched_returns]
+      ],
       deps: deps()
     ]
   end
@@ -22,7 +25,9 @@ defmodule JidoSkill.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:jido, git: "https://github.com/agentjido/jido"}
+      {:jido, git: "https://github.com/agentjido/jido"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false}
     ]
   end
 end
