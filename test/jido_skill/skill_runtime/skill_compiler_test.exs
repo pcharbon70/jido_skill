@@ -118,6 +118,110 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
              Skill.from_markdown(path)
   end
 
+  test "returns an error when jido contains unknown keys" do
+    tmp = tmp_dir("unknown_jido_keys")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: bad-jido
+      description: Unknown jido key
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+        command: "not-supported"
+      ---
+      """
+    )
+
+    assert {:error, {:unknown_jido_key, "command"}} = Skill.from_markdown(path)
+  end
+
+  test "returns an error for invalid router paths" do
+    tmp = tmp_dir("invalid_router_path")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: invalid-router
+      description: Invalid route path
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/Extract/Text": ExtractPdfText
+      ---
+      """
+    )
+
+    assert {:error, {:invalid_router_path, "pdf/Extract/Text"}} = Skill.from_markdown(path)
+  end
+
+  test "returns an error when hook contains unknown keys" do
+    tmp = tmp_dir("unknown_hook_key")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: invalid-hook
+      description: Unknown hook key
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+        hooks:
+          pre:
+            enabled: true
+            signal_type: "skill/pre"
+            bus: ":jido_code_bus"
+            source: "bad-key"
+      ---
+      """
+    )
+
+    assert {:error, {:unknown_hook_keys, "pre", ["source"]}} = Skill.from_markdown(path)
+  end
+
+  test "returns an error when hook signal_type is invalid" do
+    tmp = tmp_dir("invalid_hook_signal_type")
+    path = Path.join(tmp, "SKILL.md")
+
+    File.write!(
+      path,
+      """
+      ---
+      name: invalid-hook-signal
+      description: Invalid hook signal type
+      version: 1.0.0
+      jido:
+        actions:
+          - JidoSkill.TestActions.ExtractPdfText
+        router:
+          - "pdf/extract/text": ExtractPdfText
+        hooks:
+          post:
+            enabled: true
+            signal_type: "Skill/Post"
+            bus: ":jido_code_bus"
+      ---
+      """
+    )
+
+    assert {:error, {:invalid_hook_signal_type, "Skill/Post"}} = Skill.from_markdown(path)
+  end
+
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_compiler_#{prefix}_#{suffix}")
