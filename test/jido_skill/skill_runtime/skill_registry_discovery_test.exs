@@ -43,6 +43,54 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     global_only = SkillRegistry.get_skill(registry, "global-only")
     assert global_only.scope == :global
     assert global_only.version == "1.1.0"
+    assert global_only.permission_status == :allowed
+    assert global_only.allowed_tools == []
+  end
+
+  test "classifies skill permission status from allowed-tools and settings permissions" do
+    tmp = tmp_dir("permissions")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "allowed_skill", "allowed-skill", "1.0.0", "Allowed",
+      allowed_tools: "Read"
+    )
+
+    write_skill(local_root, "ask_skill", "ask-skill", "1.0.0", "Ask",
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_skill(local_root, "denied_skill", "denied-skill", "1.0.0", "Denied",
+      allowed_tools: "Bash(rm -rf:*)"
+    )
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          hook_defaults: %{pre: %{}, post: %{}},
+          permissions: %{
+            "allow" => ["Read"],
+            "deny" => ["Bash(rm -rf:*)"],
+            "ask" => ["Bash(git:*)"]
+          }
+        ]
+      })
+
+    assert SkillRegistry.get_skill(registry, "allowed-skill").permission_status == :allowed
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status ==
+             {:ask, ["Bash(git:*)"]}
+
+    assert SkillRegistry.get_skill(registry, "denied-skill").permission_status ==
+             {:denied, ["Bash(rm -rf:*)"]}
   end
 
   test "reload publishes skill.registry.updated signal" do
@@ -85,15 +133,17 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     assert Enum.sort(skills) == ["alpha"]
   end
 
-  defp write_skill(root, dir_name, skill_name, version, description) do
+  defp write_skill(root, dir_name, skill_name, version, description, opts \\ []) do
     skill_path = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_path)
+    allowed_tools = Keyword.get(opts, :allowed_tools)
 
     content = """
     ---
     name: #{skill_name}
     description: #{description}
     version: #{version}
+    #{allowed_tools_line(allowed_tools)}
     jido:
       actions:
         - JidoSkill.TestActions.DiscoveryAction
@@ -106,6 +156,9 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
 
     File.write!(Path.join(skill_path, "SKILL.md"), content)
   end
+
+  defp allowed_tools_line(nil), do: ""
+  defp allowed_tools_line(value), do: "allowed-tools: #{value}"
 
   defp tmp_dir(prefix) do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
