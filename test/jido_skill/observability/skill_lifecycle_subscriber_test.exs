@@ -147,12 +147,41 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert metadata.type == "skill.permission.blocked"
     assert metadata.source == "/permissions/skill/permission/blocked"
     assert metadata.bus == bus_name
+    assert is_binary(metadata.timestamp)
     assert metadata.phase == nil
     assert metadata.skill_name == "dispatcher-ask"
     assert metadata.route == "demo/ask"
     assert metadata.status == nil
     assert metadata.reason == "ask"
     assert metadata.tools == ["Bash(git:*)"]
+  end
+
+  test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+    start_supervised!({SkillLifecycleSubscriber, [name: nil, bus_name: bus_name]})
+
+    attach_handler!()
+
+    {:ok, pre_signal} =
+      Signal.new(
+        "skill.pre",
+        %{
+          "phase" => "pre",
+          "skill_name" => "timestamp-skill",
+          "route" => "demo/run",
+          "timestamp" => timestamp
+        },
+        source: "/hooks/skill/pre"
+      )
+
+    assert {:ok, _} = Bus.publish(bus_name, [pre_signal])
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.pre"
+    assert metadata.timestamp == timestamp
   end
 
   test "subscribes to configured lifecycle signal types" do

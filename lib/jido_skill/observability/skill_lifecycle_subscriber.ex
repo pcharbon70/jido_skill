@@ -351,6 +351,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
         source: signal_source(signal),
         data: data,
         bus: bus_name,
+        timestamp: lifecycle_value(data, :timestamp),
         phase: lifecycle_value(data, :phase),
         skill_name: lifecycle_value(data, :skill_name),
         route: lifecycle_value(data, :route),
