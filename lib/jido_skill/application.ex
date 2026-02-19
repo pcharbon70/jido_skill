@@ -8,6 +8,7 @@ defmodule JidoSkill.Application do
     case JidoSkill.Config.load_settings() do
       {:ok, settings} ->
         bus_name = settings.signal_bus.name
+        hook_signal_types = [settings.hooks.pre.signal_type, settings.hooks.post.signal_type]
 
         children = [
           {Jido.Signal.Bus,
@@ -25,7 +26,8 @@ defmodule JidoSkill.Application do
              permissions: settings.permissions
            ]},
           {JidoSkill.SkillRuntime.SignalDispatcher, [bus_name: bus_name]},
-          {JidoSkill.Observability.SkillLifecycleSubscriber, [bus_name: bus_name]}
+          {JidoSkill.Observability.SkillLifecycleSubscriber,
+           [bus_name: bus_name, hook_signal_types: hook_signal_types]}
         ]
 
         opts = [strategy: :one_for_one, name: JidoSkill.Supervisor]
