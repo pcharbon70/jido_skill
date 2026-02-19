@@ -60,19 +60,25 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
       |> interpolate_template(runtime_data)
       |> Map.merge(runtime_data)
 
-    if is_nil(signal_type) do
-      Logger.warning("hook configuration missing signal_type: #{inspect(hook)}")
-      :ok
-    else
-      with {:ok, signal} <-
-             Signal.new(signal_type, payload, source: "/hooks/#{source_signal_type}"),
-           {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+    cond do
+      is_nil(signal_type) or is_nil(source_signal_type) ->
+        Logger.warning("hook configuration missing signal_type: #{inspect(hook)}")
         :ok
-      else
-        {:error, reason} ->
-          Logger.warning("failed to emit lifecycle hook signal: #{inspect(reason)}")
+
+      not valid_bus_name?(bus_name) ->
+        Logger.warning("hook configuration has invalid bus: #{inspect(hook)}")
+        :ok
+
+      true ->
+        with {:ok, signal} <-
+               Signal.new(signal_type, payload, source: "/hooks/#{source_signal_type}"),
+             {:ok, _recorded} <- safe_publish(bus_name, signal) do
           :ok
-      end
+        else
+          {:error, reason} ->
+            Logger.warning("failed to emit lifecycle hook signal: #{inspect(reason)}")
+            :ok
+        end
     end
   end
 
@@ -187,11 +193,26 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
 
   defp normalize_bus_name(bus), do: bus
 
+  defp valid_bus_name?(bus_name) when is_atom(bus_name) or is_binary(bus_name), do: true
+  defp valid_bus_name?(_invalid), do: false
+
+  defp safe_publish(bus_name, signal) do
+    Bus.publish(bus_name, [signal])
+  rescue
+    error ->
+      {:error, {:publish_exception, error}}
+  catch
+    kind, reason ->
+      {:error, {:publish_exception, {kind, reason}}}
+  end
+
   defp normalize_signal_type(nil), do: nil
-  defp normalize_signal_type(type), do: String.replace(type, "/", ".")
+  defp normalize_signal_type(type) when is_binary(type), do: String.replace(type, "/", ".")
+  defp normalize_signal_type(_invalid), do: nil
 
   defp normalize_signal_source_type(nil), do: nil
-  defp normalize_signal_source_type(type), do: String.replace(type, ".", "/")
+  defp normalize_signal_source_type(type) when is_binary(type), do: String.replace(type, ".", "/")
+  defp normalize_signal_source_type(_invalid), do: nil
 
   defp safe_to_existing_atom(name) do
     {:ok, String.to_existing_atom(name)}
