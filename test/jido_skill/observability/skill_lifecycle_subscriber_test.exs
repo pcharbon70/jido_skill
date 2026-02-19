@@ -59,7 +59,8 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
     state = %{
       skills: Keyword.get(opts, :skills, []),
       hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
-      hook_defaults_error: Keyword.get(opts, :hook_defaults_error)
+      hook_defaults_error: Keyword.get(opts, :hook_defaults_error),
+      list_skills_error: Keyword.get(opts, :list_skills_error)
     }
 
     GenServer.start_link(__MODULE__, state)
@@ -68,12 +69,28 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
   def set_hook_defaults_error(server, value),
     do: GenServer.call(server, {:set_hook_defaults_error, value})
+  def set_list_skills_error(server, value),
+    do: GenServer.call(server, {:set_list_skills_error, value})
 
   @impl GenServer
   def init(state), do: {:ok, state}
 
   @impl GenServer
-  def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
+  def handle_call(:list_skills, _from, state) do
+    case state.list_skills_error do
+      nil ->
+        {:reply, state.skills, state}
+
+      {:invalid_return, value} ->
+        {:reply, value, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
+  end
 
   @impl GenServer
   def handle_call(:hook_defaults, _from, state) do
@@ -100,6 +117,11 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   @impl GenServer
   def handle_call({:set_hook_defaults_error, value}, _from, state) do
     {:reply, :ok, %{state | hook_defaults_error: value}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_list_skills_error, value}, _from, state) do
+    {:reply, :ok, %{state | list_skills_error: value}}
   end
 end
 
@@ -706,6 +728,79 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
           metadata.type == "skill.custom.pre" and metadata.skill_name == "after-registry-down"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "preserves lifecycle subscriptions when list_skills returns invalid data during refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}]]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "before-invalid-registry"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "before-invalid-registry"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_list_skills_error(
+               registry,
+               {:invalid_return, :skills_unavailable}
+             )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    assert Process.alive?(subscriber)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-invalid-registry"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-invalid-registry"
       after
         80 ->
           false
