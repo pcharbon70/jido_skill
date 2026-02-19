@@ -345,7 +345,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   end
 
   defp publish_registry_update(state) do
-    payload = %{skills: Map.keys(state.skills), count: map_size(state.skills)}
+    payload = %{skills: state.skills |> Map.keys() |> Enum.sort(), count: map_size(state.skills)}
     signal_type = normalize_signal_type("skill/registry/updated")
 
     with {:ok, signal} <-

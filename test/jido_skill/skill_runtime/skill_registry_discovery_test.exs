@@ -134,6 +134,44 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     assert Enum.sort(skills) == ["alpha"]
   end
 
+  test "reload publishes sorted skill names in registry update payload" do
+    tmp = tmp_dir("reload_sorted")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "zeta", "zeta", "1.0.0", "Zeta")
+    write_skill(local_root, "alpha", "alpha", "1.0.0", "Alpha")
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.registry.updated",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          hook_defaults: %{pre: %{}, post: %{}}
+        ]
+      })
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_receive {:signal, signal}, 1_000
+    assert signal.type == "skill.registry.updated"
+
+    skills = Map.get(signal.data, :skills) || Map.get(signal.data, "skills")
+    assert skills == ["alpha", "zeta"]
+  end
+
   defp write_skill(root, dir_name, skill_name, version, description, opts \\ []) do
     skill_path = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_path)
