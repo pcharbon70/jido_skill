@@ -27,7 +27,11 @@ defmodule JidoSkill.Application do
            ]},
           {JidoSkill.SkillRuntime.SignalDispatcher, [bus_name: bus_name]},
           {JidoSkill.Observability.SkillLifecycleSubscriber,
-           [bus_name: bus_name, hook_signal_types: hook_signal_types]}
+           [
+             bus_name: bus_name,
+             hook_signal_types: hook_signal_types,
+             registry: JidoSkill.SkillRuntime.SkillRegistry
+           ]}
         ]
 
         opts = [strategy: :one_for_one, name: JidoSkill.Supervisor]
