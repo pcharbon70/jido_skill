@@ -71,14 +71,31 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     with {:ok, registry_subscription} <-
            subscribe(bus_name, normalize_path("skill/registry/updated")),
          {:ok, refreshed_state} <-
-           refresh_state(
-             %{initial_state | registry_subscription: registry_subscription},
-             :empty
-           ) do
+           init_state_with_route_fallback(%{
+             initial_state
+             | registry_subscription: registry_subscription
+           }) do
       {:ok, refreshed_state}
     else
       {:error, reason} ->
         {:stop, {:startup_failed, reason}}
+    end
+  end
+
+  defp init_state_with_route_fallback(state) do
+    case refresh_state(state, :empty) do
+      {:ok, refreshed_state} ->
+        {:ok, refreshed_state}
+
+      {:error, {:route_subscribe_failed, _route, _subscribe_reason} = reason} ->
+        Logger.warning(
+          "failed to initialize dispatcher route subscriptions; continuing with empty routes: #{inspect(reason)}"
+        )
+
+        {:ok, state}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
