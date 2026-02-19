@@ -328,6 +328,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   defp normalize_permission_list(list) when is_list(list) do
     list
     |> Enum.map(&to_string/1)
+    |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
   end

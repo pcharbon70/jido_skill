@@ -93,6 +93,52 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
              {:denied, ["Bash(rm -rf:*)"]}
   end
 
+  test "trims whitespace in settings permission patterns before classification" do
+    tmp = tmp_dir("permissions_trim")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "allowed_skill", "allowed-skill", "1.0.0", "Allowed",
+      allowed_tools: "Read"
+    )
+
+    write_skill(local_root, "ask_skill", "ask-skill", "1.0.0", "Ask",
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_skill(local_root, "denied_skill", "denied-skill", "1.0.0", "Denied",
+      allowed_tools: "Bash(rm -rf:*)"
+    )
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          hook_defaults: %{pre: %{}, post: %{}},
+          permissions: %{
+            "allow" => ["  Read  "],
+            "deny" => ["  Bash(rm -rf:*)  "],
+            "ask" => ["  Bash(git:*)  "]
+          }
+        ]
+      })
+
+    assert SkillRegistry.get_skill(registry, "allowed-skill").permission_status == :allowed
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status ==
+             {:ask, ["Bash(git:*)"]}
+
+    assert SkillRegistry.get_skill(registry, "denied-skill").permission_status ==
+             {:denied, ["Bash(rm -rf:*)"]}
+  end
+
   test "reload publishes skill.registry.updated signal" do
     tmp = tmp_dir("reload")
     global_root = Path.join(tmp, "global")
