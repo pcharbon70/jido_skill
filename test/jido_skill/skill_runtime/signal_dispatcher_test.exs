@@ -343,10 +343,102 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_registry_down"}, 1_000
   end
 
+  test "uses cached global hook defaults when registry is unavailable" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_cached_hooks")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    create_skill(local_root, "dispatcher-cached-hooks", "demo/cached_hooks", bus_name,
+      include_hooks: false
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(%{
+        id: {:dispatcher_skill_registry, System.unique_integer([:positive])},
+        start:
+          {SkillRegistry, :start_link,
+           [
+             [
+               name: nil,
+               bus_name: bus_name,
+               global_path: global_root,
+               local_path: local_root,
+               hook_defaults: hook_defaults(bus_name),
+               permissions: default_permissions()
+             ]
+           ]},
+        restart: :temporary
+      })
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.cached_hooks"]
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.cached_hooks", "before_registry_down")
+    assert_receive {:action_ran, "before_registry_down"}, 1_000
+    assert_receive {:signal, pre_signal}, 1_000
+    assert pre_signal.type == "skill.pre"
+    assert pre_signal.data["route"] == "demo/cached_hooks"
+    assert_receive {:signal, post_signal}, 1_000
+    assert post_signal.type == "skill.post"
+    assert post_signal.data["route"] == "demo/cached_hooks"
+
+    ref = Process.monitor(registry)
+    :ok = GenServer.stop(registry, :shutdown)
+    assert_receive {:DOWN, ^ref, :process, ^registry, :shutdown}, 1_000
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.cached_hooks"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.cached_hooks", "after_registry_down")
+    assert_receive {:action_ran, "after_registry_down"}, 1_000
+    assert_receive {:signal, pre_signal_after}, 1_000
+    assert pre_signal_after.type == "skill.pre"
+    assert pre_signal_after.data["route"] == "demo/cached_hooks"
+    assert_receive {:signal, post_signal_after}, 1_000
+    assert post_signal_after.type == "skill.post"
+    assert post_signal_after.data["route"] == "demo/cached_hooks"
+  end
+
   defp create_skill(root, skill_name, route, bus_name, opts \\ []) do
     skill_dir = Path.join([root, "skills", skill_name])
     File.mkdir_p!(skill_dir)
     allowed_tools = Keyword.get(opts, :allowed_tools)
+    include_hooks = Keyword.get(opts, :include_hooks, true)
+
+    hooks_block =
+      if include_hooks do
+        [
+          "  hooks:",
+          "    pre:",
+          "      enabled: true",
+          "      signal_type: \"skill/pre\"",
+          "      bus: \"#{bus_name}\"",
+          "      data:",
+          "        source: \"#{skill_name}\"",
+          "    post:",
+          "      enabled: true",
+          "      signal_type: \"skill/post\"",
+          "      bus: \"#{bus_name}\"",
+          "      data:",
+          "        source: \"#{skill_name}\""
+        ]
+        |> Enum.join("\n")
+      else
+        ""
+      end
 
     content = """
     ---
@@ -359,19 +451,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         - JidoSkill.DispatcherTestActions.Notify
       router:
         - "#{route}": Notify
-      hooks:
-        pre:
-          enabled: true
-          signal_type: "skill/pre"
-          bus: "#{bus_name}"
-          data:
-            source: "#{skill_name}"
-        post:
-          enabled: true
-          signal_type: "skill/post"
-          bus: "#{bus_name}"
-          data:
-            source: "#{skill_name}"
+    #{hooks_block}
     ---
 
     # #{skill_name}
@@ -431,6 +511,16 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
   defp publish_dispatch_signal(bus_name, type, value) do
     with {:ok, signal} <- Signal.new(type, %{"value" => value}, source: "/test/signal"),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      _ ->
+        :error
+    end
+  end
+
+  defp publish_registry_update_signal(bus_name) do
+    with {:ok, signal} <- Signal.new("skill.registry.updated", %{}, source: "/skill_registry"),
          {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
       :ok
     else
