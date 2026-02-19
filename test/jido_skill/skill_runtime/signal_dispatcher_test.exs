@@ -44,19 +44,35 @@ defmodule JidoSkill.DispatcherTestSkills.InvalidRoute do
   def transform_result(result, _instruction, _opts), do: {:ok, result, []}
 end
 
+defmodule JidoSkill.DispatcherTestSkills.ValidRouteTwo do
+  alias Jido.Instruction
+
+  def skill_metadata do
+    %{router: [{"demo/second", JidoSkill.DispatcherTestActions.Notify}]}
+  end
+
+  def handle_signal(signal, _opts) do
+    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+  end
+
+  def transform_result(result, _instruction, _opts), do: {:ok, result, []}
+end
+
 defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   use GenServer
 
   def start_link(opts) do
     state = %{
       skills: Keyword.get(opts, :skills, []),
-      hook_defaults: Keyword.get(opts, :hook_defaults, %{})
+      hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
+      hook_defaults_error: Keyword.get(opts, :hook_defaults_error)
     }
 
     GenServer.start_link(__MODULE__, state)
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+  def set_hook_defaults_error(server, value), do: GenServer.call(server, {:set_hook_defaults_error, value})
 
   @impl GenServer
   def init(state), do: {:ok, state}
@@ -65,11 +81,27 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
 
   @impl GenServer
-  def handle_call(:hook_defaults, _from, state), do: {:reply, state.hook_defaults, state}
+  def handle_call(:hook_defaults, _from, state) do
+    case state.hook_defaults_error do
+      nil ->
+        {:reply, state.hook_defaults, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
+  end
 
   @impl GenServer
   def handle_call({:set_skills, skills}, _from, state) do
     {:reply, :ok, %{state | skills: skills}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_hook_defaults_error, value}, _from, state) do
+    {:reply, :ok, %{state | hook_defaults_error: value}}
   end
 end
 
@@ -343,6 +375,52 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_registry_down"}, 1_000
   end
 
+  test "refreshes routes while keeping cached hook defaults when hook defaults fail" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_hook_failure")
+    assert_receive {:action_ran, "before_hook_failure"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_hook_defaults_error(
+               registry,
+               {:exit, :hook_defaults_unavailable}
+             )
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_hook_failure")
+    assert_receive {:action_ran, "after_hook_failure"}, 1_000
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "old_route")
+    refute_receive {:action_ran, "old_route"}, 200
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+  end
+
   test "uses cached global hook defaults when registry is unavailable" do
     set_notify_pid!()
 
@@ -543,6 +621,15 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       name: "invalid-route-skill",
       scope: :local,
       module: JidoSkill.DispatcherTestSkills.InvalidRoute,
+      permission_status: :allowed
+    }
+  end
+
+  defp valid_dispatcher_skill_entry_two do
+    %{
+      name: "valid-route-skill-two",
+      scope: :local,
+      module: JidoSkill.DispatcherTestSkills.ValidRouteTwo,
       permission_status: :allowed
     }
   end
