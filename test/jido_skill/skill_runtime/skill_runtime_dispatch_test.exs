@@ -45,6 +45,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
     assert {:ok, instruction} = module.handle_signal(signal, global_hooks: %{})
     assert instruction.action == JidoSkill.RuntimeDispatchActions.ExtractText
     assert instruction.params == %{"file" => "report.pdf"}
+    assert instruction.context["jido_skill_route"] == "pdf/extract/text"
 
     assert_receive {:signal, emitted}, 1_000
     assert emitted.type == "skill.pre"
@@ -132,6 +133,46 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
     assert emitted.data["status"] == "error"
     assert emitted.data["route"] == "pdf/extract/tables"
     assert emitted.data["source"] == "frontmatter"
+  end
+
+  test "transform_result keeps matched route when multiple routes share an action module" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    subscribe!(bus_name, "skill.post")
+
+    path =
+      write_skill_markdown(
+        "dispatch_post_shared_action_route",
+        """
+        name: dispatch-post-shared-route
+        description: Dispatch post shared-route test
+        version: 1.0.0
+        jido:
+          actions:
+            - JidoSkill.RuntimeDispatchActions.ExtractText
+          router:
+            - "pdf/extract/text": ExtractText
+            - "pdf/extract/raw_text": ExtractText
+          hooks:
+            post:
+              enabled: true
+              signal_type: "skill/post"
+              bus: "#{bus_name}"
+        """
+      )
+
+    assert {:ok, module} = Skill.from_markdown(path)
+    {:ok, signal} = Signal.new("pdf.extract.raw_text", %{"file" => "report.pdf"}, source: "/tests")
+
+    assert {:ok, instruction} = module.handle_signal(signal, global_hooks: %{})
+    assert instruction.context["jido_skill_route"] == "pdf/extract/raw_text"
+
+    assert {:ok, {:ok, :done}, []} = module.transform_result({:ok, :done}, instruction, [])
+
+    assert_receive {:signal, emitted}, 1_000
+    assert emitted.type == "skill.post"
+    assert emitted.data["route"] == "pdf/extract/raw_text"
   end
 
   test "global hooks are used when frontmatter hooks are absent" do

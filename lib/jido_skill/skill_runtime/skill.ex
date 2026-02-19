@@ -63,7 +63,11 @@ defmodule JidoSkill.SkillRuntime.Skill do
 
             signal_data = extract_signal_data(signal)
 
-            case Instruction.new(action: action, params: signal_data) do
+            case Instruction.new(
+                   action: action,
+                   params: signal_data,
+                   context: %{"jido_skill_route" => route}
+                 ) do
               {:ok, instruction} -> {:ok, instruction}
               {:error, reason} -> {:error, {:instruction_build_failed, reason}}
             end
@@ -110,6 +114,16 @@ defmodule JidoSkill.SkillRuntime.Skill do
       defp extract_signal_data(%{"data" => data}) when is_map(data), do: data
       defp extract_signal_data(_signal), do: %{}
 
+      defp route_for_action(%Instruction{} = instruction, router) do
+        case instruction_route(instruction) do
+          route when is_binary(route) and route != "" ->
+            route
+
+          _ ->
+            route_for_action(instruction.action, router)
+        end
+      end
+
       defp route_for_action(action, router) do
         action_module = action_module(action)
 
@@ -124,6 +138,12 @@ defmodule JidoSkill.SkillRuntime.Skill do
       defp action_module(%Instruction{action: action}), do: action
       defp action_module(action) when is_atom(action), do: action
       defp action_module(_action), do: nil
+
+      defp instruction_route(%Instruction{context: context}) when is_map(context) do
+        Map.get(context, "jido_skill_route") || Map.get(context, :jido_skill_route)
+      end
+
+      defp instruction_route(_instruction), do: nil
 
       defp status_for_result({:error, _reason}), do: "error"
       defp status_for_result(:error), do: "error"
