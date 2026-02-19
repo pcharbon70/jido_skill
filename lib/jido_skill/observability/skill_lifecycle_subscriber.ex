@@ -38,7 +38,11 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     subscription_paths =
       target_subscription_paths(configured_hook_signal_types, registry, cached_hook_defaults)
 
-    with {:ok, subscriptions} <- subscribe_paths(bus_name, %{}, subscription_paths),
+    fallback_subscription_paths =
+      build_target_subscription_paths(configured_hook_signal_types, [])
+
+    with {:ok, subscriptions} <-
+           init_subscriptions(bus_name, subscription_paths, fallback_subscription_paths),
          {:ok, registry_subscription} <- subscribe_registry_updates(bus_name, registry) do
       {:ok,
        %{
@@ -51,9 +55,6 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
        }}
     else
       {:error, reason} ->
-        {:stop, {:subscription_failed, reason}}
-
-      {:error, reason, _subscriptions_after_failure, _paths_added_before_failure} ->
         {:stop, {:subscription_failed, reason}}
     end
   end
@@ -104,6 +105,57 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
       {:error, reason, updated_subscriptions, added_paths} ->
         {:error, reason, updated_subscriptions, added_paths}
+    end
+  end
+
+  defp init_subscriptions(bus_name, subscription_paths, fallback_subscription_paths) do
+    case subscribe_paths(bus_name, %{}, subscription_paths) do
+      {:ok, subscriptions} ->
+        {:ok, subscriptions}
+
+      {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+        _rolled_back =
+          rollback_subscriptions(
+            bus_name,
+            subscriptions_after_failure,
+            paths_added_before_failure
+          )
+
+        maybe_retry_init_subscriptions(
+          bus_name,
+          reason,
+          subscription_paths,
+          fallback_subscription_paths
+        )
+    end
+  end
+
+  defp maybe_retry_init_subscriptions(
+         _bus_name,
+         reason,
+         subscription_paths,
+         fallback_subscription_paths
+       )
+       when subscription_paths == fallback_subscription_paths do
+    {:error, reason}
+  end
+
+  defp maybe_retry_init_subscriptions(
+         bus_name,
+         reason,
+         _subscription_paths,
+         fallback_subscription_paths
+       ) do
+    case subscribe_paths(bus_name, %{}, fallback_subscription_paths) do
+      {:ok, fallback_subscriptions} ->
+        Logger.warning(
+          "failed to initialize registry-derived lifecycle subscriptions; continuing with base subscriptions: #{inspect(reason)}"
+        )
+
+        {:ok, fallback_subscriptions}
+
+      {:error, fallback_reason, _subscriptions_after_failure, _paths_added_before_failure} ->
+        {:error, fallback_reason}
     end
   end
 
