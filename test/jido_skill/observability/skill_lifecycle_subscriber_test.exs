@@ -196,6 +196,130 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
   end
 
+  test "subscribes to inherited global signal type when frontmatter explicitly enables hook" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("hook_inherit_enabled")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    write_skill(
+      local_root,
+      "registry-inherit-enabled",
+      "registry-inherit-enabled",
+      "demo/inherit-enabled",
+      pre_enabled: true
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: %{
+             pre: %{enabled: false, signal_type: "skill/pre"},
+             post: %{enabled: false, signal_type: "skill/post"}
+           },
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         registry: registry,
+         hook_signal_types: [],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "inherit-enabled"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "inherit-enabled"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "does not subscribe frontmatter hook when disabled global default is not overridden" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("hook_inherit_disabled")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    write_skill(
+      local_root,
+      "registry-inherit-disabled",
+      "registry-inherit-disabled",
+      "demo/inherit-disabled",
+      pre_signal_type: "skill/custom/inherit_disabled"
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: %{
+             pre: %{enabled: false, signal_type: "skill/pre"},
+             post: %{enabled: false, signal_type: "skill/post"}
+           },
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         registry: registry,
+         hook_signal_types: [],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.inherit_disabled",
+            "/hooks/skill/custom/inherit_disabled",
+            "inherit-disabled"
+          )
+      end,
+      8,
+      50
+    )
+  end
+
   test "refreshes lifecycle subscriptions from registry hook signal types after reload" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     root = tmp_dir("lifecycle_registry_refresh")
@@ -473,22 +597,28 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     skill_dir = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_dir)
 
+    pre_signal_type = Keyword.get(opts, :pre_signal_type)
+    pre_enabled = Keyword.fetch(opts, :pre_enabled)
+
     hooks_block =
-      case Keyword.get(opts, :pre_signal_type) do
-        nil ->
+      case {pre_signal_type, pre_enabled} do
+        {nil, :error} ->
           ""
 
-        signal_type ->
-          enabled_line =
-            case Keyword.fetch(opts, :pre_enabled) do
-              {:ok, value} ->
-                "      enabled: #{value}\n"
-
-              :error ->
-                ""
+        _ ->
+          signal_type_line =
+            case pre_signal_type do
+              nil -> ""
+              signal_type -> "      signal_type: \"#{signal_type}\"\n"
             end
 
-          "  hooks:\n    pre:\n      signal_type: \"#{signal_type}\"\n#{enabled_line}"
+          enabled_line =
+            case pre_enabled do
+              {:ok, value} -> "      enabled: #{value}\n"
+              :error -> ""
+            end
+
+          "  hooks:\n    pre:\n#{signal_type_line}#{enabled_line}"
       end
 
     content = """

@@ -191,9 +191,11 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   defp registry_hook_signal_types(nil), do: []
 
   defp registry_hook_signal_types(registry) do
+    hook_defaults = safe_hook_defaults(registry)
+
     registry
     |> safe_list_skills()
-    |> Enum.flat_map(&skill_hook_signal_types/1)
+    |> Enum.flat_map(&skill_hook_signal_types(&1, hook_defaults))
     |> Enum.map(&normalize_signal_type/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
@@ -209,12 +211,22 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       []
   end
 
-  defp skill_hook_signal_types(%{module: module}) when is_atom(module) do
+  defp safe_hook_defaults(registry) do
+    SkillRegistry.hook_defaults(registry)
+  rescue
+    _error ->
+      %{}
+  catch
+    :exit, _reason ->
+      %{}
+  end
+
+  defp skill_hook_signal_types(%{module: module}, hook_defaults) when is_atom(module) do
     if function_exported?(module, :skill_metadata, 0) do
       module
       |> then(& &1.skill_metadata())
       |> Map.get(:hooks, %{})
-      |> hook_signal_types_from_metadata()
+      |> hook_signal_types_from_metadata(hook_defaults)
     else
       []
     end
@@ -226,29 +238,38 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       []
   end
 
-  defp skill_hook_signal_types(_skill), do: []
+  defp skill_hook_signal_types(_skill, _hook_defaults), do: []
 
-  defp hook_signal_types_from_metadata(hooks) when is_map(hooks) do
+  defp hook_signal_types_from_metadata(hooks, hook_defaults) when is_map(hooks) do
     [:pre, :post]
-    |> Enum.map(&hook_signal_type(hooks, &1))
+    |> Enum.map(&hook_signal_type(hooks, hook_defaults, &1))
     |> Enum.reject(&is_nil/1)
   end
 
-  defp hook_signal_types_from_metadata(_hooks), do: []
+  defp hook_signal_types_from_metadata(_hooks, _hook_defaults), do: []
 
-  defp hook_signal_type(hooks, key) do
-    hook = Map.get(hooks, key) || Map.get(hooks, Atom.to_string(key))
+  defp hook_signal_type(hooks, hook_defaults, key) do
+    hook = map_get_optional(hooks, key)
+    global_hook = map_get_optional(hook_defaults, key)
 
     case hook do
       map when is_map(map) ->
-        if hook_enabled?(map) do
-          Map.get(map, :signal_type) || Map.get(map, "signal_type")
+        if effective_hook_enabled?(map, global_hook) do
+          map_get_optional(map, :signal_type) || map_get_optional(global_hook, :signal_type)
         else
           nil
         end
 
       _ ->
         nil
+    end
+  end
+
+  defp effective_hook_enabled?(hook, global_hook) do
+    case map_get_optional(hook, :enabled) do
+      true -> true
+      false -> false
+      nil -> hook_enabled?(global_hook)
     end
   end
 
@@ -259,7 +280,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     end
   end
 
-  defp map_get_optional(map, key) do
+  defp map_get_optional(map, key) when is_map(map) do
     cond do
       Map.has_key?(map, key) ->
         Map.get(map, key)
@@ -271,6 +292,8 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
         nil
     end
   end
+
+  defp map_get_optional(_invalid, _key), do: nil
 
   defp normalize_path(path) when is_binary(path), do: String.replace(path, "/", ".")
   defp normalize_path(_invalid), do: nil
