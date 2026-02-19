@@ -332,6 +332,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp emit_permission_blocked_signal(bus_name, skill_name, route, reason, tools) do
+    source_signal_type = "skill/permission/blocked"
     signal_type = normalize_path("skill/permission/blocked")
 
     payload = %{
@@ -343,7 +344,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     }
 
     with {:ok, signal} <-
-           Signal.new(signal_type, payload, source: "/permissions/#{signal_type}"),
+           Signal.new(signal_type, payload, source: "/permissions/#{source_signal_type}"),
          {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
       :ok
     else

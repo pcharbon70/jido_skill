@@ -304,6 +304,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:signal, blocked_signal}, 1_000
 
     assert blocked_signal.type == "skill.permission.blocked"
+    assert blocked_signal.source == "/permissions/skill/permission/blocked"
     assert blocked_signal.data["skill_name"] == skill_name
     assert blocked_signal.data["route"] == route
     assert blocked_signal.data["reason"] == reason
