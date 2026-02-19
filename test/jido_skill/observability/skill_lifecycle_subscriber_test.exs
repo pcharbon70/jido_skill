@@ -736,6 +736,25 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
 
     drain_telemetry_messages()
 
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-remove-transition"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, _metadata} ->
+          drain_telemetry_messages()
+          false
+      after
+        80 ->
+          true
+      end
+    end)
+
     assert_unobserved_over_time(
       fn ->
         :ok =
@@ -746,8 +765,8 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
             "after-remove"
           )
       end,
-      8,
-      50
+      6,
+      80
     )
   end
 

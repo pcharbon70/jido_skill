@@ -115,10 +115,9 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp refresh_state(state) do
-    handlers = build_route_handlers(state.registry)
-    target_routes = Map.keys(handlers)
-
-    with {:ok, route_subscriptions} <-
+    with {:ok, handlers} <- build_route_handlers(state.registry),
+         target_routes = Map.keys(handlers),
+         {:ok, route_subscriptions} <-
            sync_route_subscriptions(
              state.bus_name,
              state.route_subscriptions,
@@ -134,31 +133,18 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp build_route_handlers(registry) do
-    raw_handlers =
-      registry
-      |> SkillRegistry.list_skills()
-      |> Enum.reduce(%{}, fn skill, acc ->
-        skill
-        |> skill_routes()
-        |> Enum.reduce(acc, fn route, route_acc ->
-          normalized_route = normalize_path(route)
-          Map.update(route_acc, normalized_route, [skill], &[skill | &1])
+    with {:ok, skills} <- safe_list_skills(registry) do
+      raw_handlers =
+        skills
+        |> Enum.reduce(%{}, &accumulate_skill_routes/2)
+
+      handlers =
+        Enum.into(raw_handlers, %{}, fn {route, skills} ->
+          {route, order_route_skills(route, skills)}
         end)
-      end)
 
-    Enum.into(raw_handlers, %{}, fn {route, skills} ->
-      ordered_skills = Enum.sort_by(skills, &skill_priority/1)
-
-      if length(ordered_skills) > 1 do
-        skill_names = Enum.map_join(ordered_skills, ", ", &Map.get(&1, :name))
-
-        Logger.warning(
-          "multiple skills match route #{route}; using first match order: #{skill_names}"
-        )
-      end
-
-      {route, ordered_skills}
-    end)
+      {:ok, handlers}
+    end
   end
 
   defp skill_routes(%{module: module}) when is_atom(module) do
@@ -177,6 +163,19 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   defp skill_routes(_invalid), do: []
 
+  defp accumulate_skill_routes(skill, route_handlers) do
+    skill
+    |> skill_routes()
+    |> Enum.reduce(route_handlers, fn route, route_acc ->
+      add_route_handler(route_acc, route, skill)
+    end)
+  end
+
+  defp add_route_handler(route_handlers, route, skill) do
+    normalized_route = normalize_path(route)
+    Map.update(route_handlers, normalized_route, [skill], &[skill | &1])
+  end
+
   defp skill_priority(skill) do
     scope_priority =
       case Map.get(skill, :scope) do
@@ -185,6 +184,22 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       end
 
     {scope_priority, Map.get(skill, :name, "")}
+  end
+
+  defp order_route_skills(route, skills) do
+    ordered_skills = Enum.sort_by(skills, &skill_priority/1)
+    log_route_conflict(route, ordered_skills)
+    ordered_skills
+  end
+
+  defp log_route_conflict(route, ordered_skills) do
+    if length(ordered_skills) > 1 do
+      skill_names = Enum.map_join(ordered_skills, ", ", &Map.get(&1, :name))
+
+      Logger.warning(
+        "multiple skills match route #{route}; using first match order: #{skill_names}"
+      )
+    end
   end
 
   defp sync_route_subscriptions(bus_name, current_subscriptions, target_routes) do
@@ -449,6 +464,19 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   catch
     :exit, _reason ->
       %{}
+  end
+
+  defp safe_list_skills(registry) do
+    {:ok, SkillRegistry.list_skills(registry)}
+  rescue
+    error ->
+      {:error, {:list_skills_failed, {:exception, error}}}
+  catch
+    :exit, reason ->
+      {:error, {:list_skills_failed, {:exit, reason}}}
+
+    kind, reason ->
+      {:error, {:list_skills_failed, {kind, reason}}}
   end
 
   defp normalize_route(route) when is_binary(route), do: String.replace(route, ".", "/")
