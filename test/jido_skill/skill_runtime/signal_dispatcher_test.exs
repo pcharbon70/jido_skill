@@ -447,6 +447,38 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_registry_down"}, 1_000
   end
 
+  test "starts with empty routes when initial list_skills read fails and recovers on refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           list_skills_error: {:invalid_return, :skills_unavailable}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_recovery")
+    refute_receive {:action_ran, "before_recovery"}, 200
+
+    assert :ok = SignalDispatcherTestRegistry.set_list_skills_error(registry, nil)
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_recovery")
+    assert_receive {:action_ran, "after_recovery"}, 1_000
+  end
+
   test "preserves existing routes when list_skills returns invalid data during refresh" do
     set_notify_pid!()
 

@@ -71,7 +71,10 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     with {:ok, registry_subscription} <-
            subscribe(bus_name, normalize_path("skill/registry/updated")),
          {:ok, refreshed_state} <-
-           refresh_state(%{initial_state | registry_subscription: registry_subscription}) do
+           refresh_state(
+             %{initial_state | registry_subscription: registry_subscription},
+             :empty
+           ) do
       {:ok, refreshed_state}
     else
       {:error, reason} ->
@@ -86,7 +89,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   @impl GenServer
   def handle_call(:refresh, _from, state) do
-    case refresh_state(state) do
+    case refresh_state(state, :error) do
       {:ok, new_state} -> {:reply, :ok, new_state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -94,7 +97,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   @impl GenServer
   def handle_info({:signal, %Signal{type: "skill.registry.updated"}}, state) do
-    case refresh_state(state) do
+    case refresh_state(state, :error) do
       {:ok, new_state} ->
         {:noreply, new_state}
 
@@ -116,8 +119,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   @impl GenServer
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp refresh_state(state) do
-    with {:ok, handlers} <- build_route_handlers(state.registry),
+  defp refresh_state(state, mode) do
+    with {:ok, handlers} <- build_route_handlers(state.registry, mode),
          target_routes = Map.keys(handlers),
          {:ok, route_subscriptions} <-
            sync_route_subscriptions(
@@ -140,8 +143,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     end
   end
 
-  defp build_route_handlers(registry) do
-    with {:ok, skills} <- safe_list_skills(registry) do
+  defp build_route_handlers(registry, mode) do
+    with {:ok, skills} <- safe_list_skills(registry, mode) do
       raw_handlers =
         skills
         |> Enum.reduce(%{}, &accumulate_skill_routes/2)
@@ -501,24 +504,28 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     )
   end
 
-  defp safe_list_skills(registry) do
+  defp safe_list_skills(registry, mode) do
     case GenServer.call(registry, :list_skills) do
       skills when is_list(skills) ->
         {:ok, skills}
 
       other ->
-        {:error, {:list_skills_failed, {:invalid_result, other}}}
+        handle_list_skills_read_error({:invalid_result, other}, mode, [])
     end
   rescue
     error ->
-      {:error, {:list_skills_failed, {:exception, error}}}
+      handle_list_skills_read_error({:exception, error}, mode, [])
   catch
     :exit, reason ->
-      {:error, {:list_skills_failed, {:exit, reason}}}
+      handle_list_skills_read_error({:exit, reason}, mode, [])
 
     kind, reason ->
-      {:error, {:list_skills_failed, {kind, reason}}}
+      handle_list_skills_read_error({kind, reason}, mode, [])
   end
+
+  defp handle_list_skills_read_error(_reason, :empty, fallback), do: {:ok, fallback}
+  defp handle_list_skills_read_error(reason, :error, _fallback),
+    do: {:error, {:list_skills_failed, reason}}
 
   defp normalize_route(route) when is_binary(route), do: String.replace(route, ".", "/")
   defp normalize_route(route), do: route
