@@ -160,8 +160,24 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   defp normalize_signal_type(_invalid), do: nil
 
   defp target_subscription_paths(configured_hook_signal_types, registry) do
+    registry_hook_signal_types =
+      case registry_hook_signal_types(registry, :empty) do
+        {:ok, signal_types} -> signal_types
+        {:error, _reason} -> []
+      end
+
+    build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)
+  end
+
+  defp target_subscription_paths_for_refresh(configured_hook_signal_types, registry) do
+    with {:ok, registry_hook_signal_types} <- registry_hook_signal_types(registry, :error) do
+      {:ok, build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)}
+    end
+  end
+
+  defp build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types) do
     configured_hook_signal_types
-    |> Kernel.++(registry_hook_signal_types(registry))
+    |> Kernel.++(registry_hook_signal_types)
     |> Kernel.++([@permission_blocked_signal_type])
     |> Enum.map(&normalize_path/1)
     |> Enum.reject(&is_nil/1)
@@ -175,27 +191,32 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp refresh_subscriptions(state) do
-    target_paths = target_subscription_paths(state.configured_hook_signal_types, state.registry)
-    current_paths = Map.keys(state.subscriptions) |> MapSet.new()
-    target_path_set = MapSet.new(target_paths)
+    with {:ok, target_paths} <-
+           target_subscription_paths_for_refresh(
+             state.configured_hook_signal_types,
+             state.registry
+           ) do
+      current_paths = Map.keys(state.subscriptions) |> MapSet.new()
+      target_path_set = MapSet.new(target_paths)
 
-    paths_to_remove = MapSet.difference(current_paths, target_path_set) |> MapSet.to_list()
-    paths_to_add = MapSet.difference(target_path_set, current_paths) |> MapSet.to_list()
+      paths_to_remove = MapSet.difference(current_paths, target_path_set) |> MapSet.to_list()
+      paths_to_add = MapSet.difference(target_path_set, current_paths) |> MapSet.to_list()
 
-    case subscribe_paths(state.bus_name, state.subscriptions, paths_to_add) do
-      {:ok, after_subscribe} ->
-        after_sync = unsubscribe_paths(state.bus_name, after_subscribe, paths_to_remove)
-        {:ok, %{state | subscriptions: after_sync}}
+      case subscribe_paths(state.bus_name, state.subscriptions, paths_to_add) do
+        {:ok, after_subscribe} ->
+          after_sync = unsubscribe_paths(state.bus_name, after_subscribe, paths_to_remove)
+          {:ok, %{state | subscriptions: after_sync}}
 
-      {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
-        _rolled_back =
-          rollback_subscriptions(
-            state.bus_name,
-            subscriptions_after_failure,
-            paths_added_before_failure
-          )
+        {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+          _rolled_back =
+            rollback_subscriptions(
+              state.bus_name,
+              subscriptions_after_failure,
+              paths_added_before_failure
+            )
 
-        {:error, reason}
+          {:error, reason}
+      end
     end
   end
 
@@ -230,38 +251,51 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     unsubscribe_paths(bus_name, subscriptions, paths)
   end
 
-  defp registry_hook_signal_types(nil), do: []
+  defp registry_hook_signal_types(nil, _mode), do: {:ok, []}
 
-  defp registry_hook_signal_types(registry) do
-    hook_defaults = safe_hook_defaults(registry)
+  defp registry_hook_signal_types(registry, mode) do
+    with {:ok, hook_defaults} <- safe_hook_defaults(registry, mode),
+         {:ok, skills} <- safe_list_skills(registry, mode) do
+      signal_types =
+        skills
+        |> Enum.flat_map(&skill_hook_signal_types(&1, hook_defaults))
+        |> Enum.map(&normalize_signal_type/1)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
 
-    registry
-    |> safe_list_skills()
-    |> Enum.flat_map(&skill_hook_signal_types(&1, hook_defaults))
-    |> Enum.map(&normalize_signal_type/1)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
+      {:ok, signal_types}
+    end
   end
 
-  defp safe_list_skills(registry) do
-    SkillRegistry.list_skills(registry)
+  defp safe_list_skills(registry, mode) do
+    {:ok, SkillRegistry.list_skills(registry)}
   rescue
-    _error ->
-      []
+    error ->
+      handle_registry_read_error({:list_skills_exception, error}, mode, [])
   catch
-    :exit, _reason ->
-      []
+    :exit, reason ->
+      handle_registry_read_error({:list_skills_exit, reason}, mode, [])
+
+    kind, reason ->
+      handle_registry_read_error({:list_skills_error, {kind, reason}}, mode, [])
   end
 
-  defp safe_hook_defaults(registry) do
-    SkillRegistry.hook_defaults(registry)
+  defp safe_hook_defaults(registry, mode) do
+    {:ok, SkillRegistry.hook_defaults(registry)}
   rescue
-    _error ->
-      %{}
+    error ->
+      handle_registry_read_error({:hook_defaults_exception, error}, mode, %{})
   catch
-    :exit, _reason ->
-      %{}
+    :exit, reason ->
+      handle_registry_read_error({:hook_defaults_exit, reason}, mode, %{})
+
+    kind, reason ->
+      handle_registry_read_error({:hook_defaults_error, {kind, reason}}, mode, %{})
   end
+
+  defp handle_registry_read_error(_reason, :empty, fallback), do: {:ok, fallback}
+  defp handle_registry_read_error(reason, :error, _fallback),
+    do: {:error, {:registry_read_failed, reason}}
 
   defp skill_hook_signal_types(%{module: module}, hook_defaults) when is_atom(module) do
     if function_exported?(module, :skill_metadata, 0) do
