@@ -10,7 +10,6 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   alias Jido.Signal
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.SkillRegistry
 
   require Logger
 
@@ -310,7 +309,13 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp safe_list_skills(registry, mode) do
-    {:ok, SkillRegistry.list_skills(registry)}
+    case GenServer.call(registry, :list_skills) do
+      skills when is_list(skills) ->
+        {:ok, skills}
+
+      other ->
+        handle_registry_read_error({:list_skills_invalid_result, other}, mode, [])
+    end
   rescue
     error ->
       handle_registry_read_error({:list_skills_exception, error}, mode, [])
