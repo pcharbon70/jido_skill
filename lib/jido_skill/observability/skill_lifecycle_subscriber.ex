@@ -49,6 +49,9 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     else
       {:error, reason} ->
         {:stop, {:subscription_failed, reason}}
+
+      {:error, reason, _subscriptions_after_failure, _paths_added_before_failure} ->
+        {:stop, {:subscription_failed, reason}}
     end
   end
 
@@ -82,15 +85,23 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp subscribe_paths(bus_name, subscriptions, paths) do
-    Enum.reduce_while(paths, {:ok, subscriptions}, fn path, {:ok, acc} ->
+    paths
+    |> Enum.reduce_while({:ok, subscriptions, []}, fn path, {:ok, acc, added_paths} ->
       case subscribe(bus_name, path) do
         {:ok, subscription} ->
-          {:cont, {:ok, Map.put(acc, path, subscription)}}
+          {:cont, {:ok, Map.put(acc, path, subscription), [path | added_paths]}}
 
         {:error, reason} ->
-          {:halt, {:error, {:subscribe_failed, path, reason}}}
+          {:halt, {:error, {:subscribe_failed, path, reason}, acc, added_paths}}
       end
     end)
+    |> case do
+      {:ok, updated_subscriptions, _added_paths} ->
+        {:ok, updated_subscriptions}
+
+      {:error, reason, updated_subscriptions, added_paths} ->
+        {:error, reason, updated_subscriptions, added_paths}
+    end
   end
 
   defp hook_signal_types(opts) do
@@ -149,14 +160,19 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     paths_to_remove = MapSet.difference(current_paths, target_path_set) |> MapSet.to_list()
     paths_to_add = MapSet.difference(target_path_set, current_paths) |> MapSet.to_list()
 
-    remaining_subscriptions =
-      unsubscribe_paths(state.bus_name, state.subscriptions, paths_to_remove)
+    case subscribe_paths(state.bus_name, state.subscriptions, paths_to_add) do
+      {:ok, after_subscribe} ->
+        after_sync = unsubscribe_paths(state.bus_name, after_subscribe, paths_to_remove)
+        {:ok, %{state | subscriptions: after_sync}}
 
-    case subscribe_paths(state.bus_name, remaining_subscriptions, paths_to_add) do
-      {:ok, subscriptions} ->
-        {:ok, %{state | subscriptions: subscriptions}}
+      {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+        _rolled_back =
+          rollback_subscriptions(
+            state.bus_name,
+            subscriptions_after_failure,
+            paths_added_before_failure
+          )
 
-      {:error, reason} ->
         {:error, reason}
     end
   end
@@ -186,6 +202,10 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
           "failed to unsubscribe lifecycle path #{path} (#{subscription_id}): #{inspect(reason)}"
         )
     end
+  end
+
+  defp rollback_subscriptions(bus_name, subscriptions, paths) do
+    unsubscribe_paths(bus_name, subscriptions, paths)
   end
 
   defp registry_hook_signal_types(nil), do: []
