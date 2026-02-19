@@ -56,6 +56,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       %{count: 1},
       %{
         type: signal.type,
+        source: signal_source(signal),
         data: data,
         bus: bus_name,
         phase: lifecycle_value(data, :phase),
@@ -70,6 +71,10 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   defp ensure_map(value) when is_map(value), do: value
   defp ensure_map(_value), do: %{}
+
+  defp signal_source(%{source: source}) when is_binary(source), do: source
+  defp signal_source(%{"source" => source}) when is_binary(source), do: source
+  defp signal_source(_signal), do: nil
 
   defp lifecycle_value(data, key) do
     Map.get(data, key) || Map.get(data, Atom.to_string(key))
