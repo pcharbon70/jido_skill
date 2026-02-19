@@ -1,11 +1,67 @@
 defmodule JidoSkill.Observability.TestActions.HookSignal do
 end
 
+defmodule JidoSkill.Observability.TestSkills.ValidLifecycleHook do
+  def skill_metadata do
+    %{
+      hooks: %{
+        pre: %{
+          enabled: true,
+          signal_type: "skill/custom/pre"
+        }
+      }
+    }
+  end
+end
+
+defmodule JidoSkill.Observability.TestSkills.InvalidLifecycleHook do
+  def skill_metadata do
+    %{
+      hooks: %{
+        pre: %{
+          enabled: true,
+          signal_type: "skill//broken"
+        }
+      }
+    }
+  end
+end
+
+defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
+  use GenServer
+
+  def start_link(opts) do
+    state = %{
+      skills: Keyword.get(opts, :skills, []),
+      hook_defaults: Keyword.get(opts, :hook_defaults, %{})
+    }
+
+    GenServer.start_link(__MODULE__, state)
+  end
+
+  def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+
+  @impl GenServer
+  def init(state), do: {:ok, state}
+
+  @impl GenServer
+  def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
+
+  @impl GenServer
+  def handle_call(:hook_defaults, _from, state), do: {:reply, state.hook_defaults, state}
+
+  @impl GenServer
+  def handle_call({:set_skills, skills}, _from, state) do
+    {:reply, :ok, %{state | skills: skills}}
+  end
+end
+
 defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
   use ExUnit.Case, async: false
 
   alias Jido.Signal
   alias Jido.Signal.Bus
+  alias JidoSkill.Observability.LifecycleSubscriberTestRegistry
   alias JidoSkill.Observability.SkillLifecycleSubscriber
   alias JidoSkill.SkillRuntime.SkillRegistry
 
@@ -388,6 +444,76 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "preserves existing lifecycle subscriptions when refresh fails adding new signal types" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}]]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         registry: registry,
+         hook_signal_types: [],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "before-refresh-failure"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and
+            metadata.skill_name == "before-refresh-failure"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_skills(registry, [
+               %{module: JidoSkill.Observability.TestSkills.InvalidLifecycleHook}
+             ])
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-refresh-failure"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-refresh-failure"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "does not subscribe disabled hook signal types until they are enabled and reloaded" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     root = tmp_dir("disabled_hook_refresh")
@@ -585,6 +711,16 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
              %{"phase" => "pre", "skill_name" => skill_name, "route" => "demo/run"},
              source: source
            ),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      _ ->
+        :error
+    end
+  end
+
+  defp publish_registry_update_signal(bus_name) do
+    with {:ok, signal} <- Signal.new("skill.registry.updated", %{}, source: "/skill_registry"),
          {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
       :ok
     else
