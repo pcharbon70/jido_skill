@@ -118,7 +118,6 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   defp refresh_state(state) do
     with {:ok, handlers} <- build_route_handlers(state.registry),
-         {:ok, hook_defaults} <- safe_hook_defaults(state.registry),
          target_routes = Map.keys(handlers),
          {:ok, route_subscriptions} <-
            sync_route_subscriptions(
@@ -126,6 +125,11 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
              state.route_subscriptions,
              target_routes
            ) do
+      {hook_defaults, hook_defaults_refresh_error} =
+        resolve_hook_defaults(state.registry, state.hook_defaults)
+
+      log_hook_defaults_refresh_error(hook_defaults_refresh_error)
+
       {:ok,
        %{
          state
@@ -471,6 +475,24 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
     kind, reason ->
       {:error, {:hook_defaults_failed, {kind, reason}}}
+  end
+
+  defp resolve_hook_defaults(registry, current_hook_defaults) do
+    case safe_hook_defaults(registry) do
+      {:ok, hook_defaults} ->
+        {hook_defaults, nil}
+
+      {:error, reason} ->
+        {current_hook_defaults, reason}
+    end
+  end
+
+  defp log_hook_defaults_refresh_error(nil), do: :ok
+
+  defp log_hook_defaults_refresh_error(reason) do
+    Logger.warning(
+      "failed to refresh hook defaults; keeping cached defaults: #{inspect(reason)}"
+    )
   end
 
   defp safe_list_skills(registry) do
