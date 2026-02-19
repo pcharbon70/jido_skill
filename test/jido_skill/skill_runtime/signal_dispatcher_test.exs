@@ -16,12 +16,70 @@ defmodule JidoSkill.DispatcherTestActions.Notify do
   end
 end
 
+defmodule JidoSkill.DispatcherTestSkills.ValidRoute do
+  alias Jido.Instruction
+
+  def skill_metadata do
+    %{router: [{"demo/rollback", JidoSkill.DispatcherTestActions.Notify}]}
+  end
+
+  def handle_signal(signal, _opts) do
+    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+  end
+
+  def transform_result(result, _instruction, _opts), do: {:ok, result, []}
+end
+
+defmodule JidoSkill.DispatcherTestSkills.InvalidRoute do
+  alias Jido.Instruction
+
+  def skill_metadata do
+    %{router: [{123, JidoSkill.DispatcherTestActions.Notify}]}
+  end
+
+  def handle_signal(signal, _opts) do
+    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+  end
+
+  def transform_result(result, _instruction, _opts), do: {:ok, result, []}
+end
+
+defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
+  use GenServer
+
+  def start_link(opts) do
+    state = %{
+      skills: Keyword.get(opts, :skills, []),
+      hook_defaults: Keyword.get(opts, :hook_defaults, %{})
+    }
+
+    GenServer.start_link(__MODULE__, state)
+  end
+
+  def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+
+  @impl GenServer
+  def init(state), do: {:ok, state}
+
+  @impl GenServer
+  def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
+
+  @impl GenServer
+  def handle_call(:hook_defaults, _from, state), do: {:reply, state.hook_defaults, state}
+
+  @impl GenServer
+  def handle_call({:set_skills, skills}, _from, state) do
+    {:reply, :ok, %{state | skills: skills}}
+  end
+end
+
 defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
   use ExUnit.Case, async: false
 
   alias Jido.Signal
   alias Jido.Signal.Bus
   alias JidoSkill.SkillRuntime.SignalDispatcher
+  alias JidoSkill.SkillRuntime.SignalDispatcherTestRegistry
   alias JidoSkill.SkillRuntime.SkillRegistry
 
   test "dispatches matching signals to skills and emits lifecycle hooks" do
@@ -214,6 +272,37 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_permission_blocked_signal("dispatcher-denied", "demo/denied", "denied", ["Bash(rm:*)"])
   end
 
+  test "preserves existing route subscriptions when refresh fails adding new routes" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry, [skills: [valid_dispatcher_skill_entry()]]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_failure")
+    assert_receive {:action_ran, "before_failure"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [invalid_dispatcher_skill_entry()])
+
+    assert {:error, {:route_subscribe_failed, 123, _reason}} =
+             SignalDispatcher.refresh(dispatcher)
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_failure")
+    assert_receive {:action_ran, "after_failure"}, 1_000
+  end
+
   defp create_skill(root, skill_name, route, bus_name, opts \\ []) do
     skill_dir = Path.join([root, "skills", skill_name])
     File.mkdir_p!(skill_dir)
@@ -299,6 +388,34 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
   defp allowed_tools_line(nil), do: ""
   defp allowed_tools_line(value), do: "allowed-tools: #{value}"
+
+  defp publish_dispatch_signal(bus_name, type, value) do
+    with {:ok, signal} <- Signal.new(type, %{"value" => value}, source: "/test/signal"),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      _ ->
+        :error
+    end
+  end
+
+  defp valid_dispatcher_skill_entry do
+    %{
+      name: "valid-route-skill",
+      scope: :local,
+      module: JidoSkill.DispatcherTestSkills.ValidRoute,
+      permission_status: :allowed
+    }
+  end
+
+  defp invalid_dispatcher_skill_entry do
+    %{
+      name: "invalid-route-skill",
+      scope: :local,
+      module: JidoSkill.DispatcherTestSkills.InvalidRoute,
+      permission_status: :allowed
+    }
+  end
 
   defp assert_permission_blocked_signal(skill_name, route, reason, tools) do
     assert_receive {:signal, blocked_signal}, 1_000
