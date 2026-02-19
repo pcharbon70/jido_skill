@@ -27,19 +27,47 @@ defmodule JidoSkill.Observability.TestSkills.InvalidLifecycleHook do
   end
 end
 
+defmodule JidoSkill.Observability.TestSkills.InheritedLifecycleHook do
+  def skill_metadata do
+    %{
+      hooks: %{
+        pre: %{
+          signal_type: "skill/inherit/pre"
+        }
+      }
+    }
+  end
+end
+
+defmodule JidoSkill.Observability.TestSkills.ExplicitLifecycleHook do
+  def skill_metadata do
+    %{
+      hooks: %{
+        pre: %{
+          enabled: true,
+          signal_type: "skill/explicit/pre"
+        }
+      }
+    }
+  end
+end
+
 defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   use GenServer
 
   def start_link(opts) do
     state = %{
       skills: Keyword.get(opts, :skills, []),
-      hook_defaults: Keyword.get(opts, :hook_defaults, %{})
+      hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
+      hook_defaults_error: Keyword.get(opts, :hook_defaults_error)
     }
 
     GenServer.start_link(__MODULE__, state)
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+  def set_hook_defaults_error(server, value),
+    do: GenServer.call(server, {:set_hook_defaults_error, value})
 
   @impl GenServer
   def init(state), do: {:ok, state}
@@ -48,11 +76,30 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
 
   @impl GenServer
-  def handle_call(:hook_defaults, _from, state), do: {:reply, state.hook_defaults, state}
+  def handle_call(:hook_defaults, _from, state) do
+    case state.hook_defaults_error do
+      nil ->
+        {:reply, state.hook_defaults, state}
+
+      {:invalid_return, value} ->
+        {:reply, value, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
+  end
 
   @impl GenServer
   def handle_call({:set_skills, skills}, _from, state) do
     {:reply, :ok, %{state | skills: skills}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_hook_defaults_error, value}, _from, state) do
+    {:reply, :ok, %{state | hook_defaults_error: value}}
   end
 end
 
@@ -664,6 +711,100 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
           false
       end
     end)
+  end
+
+  test "refreshes explicit hooks while preserving inherited disable when hook defaults refresh fails" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [%{module: JidoSkill.Observability.TestSkills.InheritedLifecycleHook}],
+           hook_defaults: %{
+             pre: %{enabled: false, signal_type: "skill/pre"},
+             post: %{enabled: true, signal_type: "skill/post"}
+           }
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         registry: registry,
+         hook_signal_types: [],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.inherit.pre",
+            "/hooks/skill/inherit/pre",
+            "inherit-before"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_skills(registry, [
+               %{module: JidoSkill.Observability.TestSkills.InheritedLifecycleHook},
+               %{module: JidoSkill.Observability.TestSkills.ExplicitLifecycleHook}
+             ])
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_hook_defaults_error(
+               registry,
+               {:invalid_return, :hook_defaults_unavailable}
+             )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.explicit.pre",
+          "/hooks/skill/explicit/pre",
+          "explicit-after"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.explicit.pre" and metadata.skill_name == "explicit-after"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.inherit.pre",
+            "/hooks/skill/inherit/pre",
+            "inherit-after"
+          )
+      end,
+      6,
+      60
+    )
   end
 
   test "does not subscribe disabled hook signal types until they are enabled and reloaded" do
