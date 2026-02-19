@@ -661,6 +661,141 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "starts with base subscriptions when registry hook paths are invalid and recovers after refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [skills: [%{module: JidoSkill.Observability.TestSkills.InvalidLifecycleHook}]]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.pre",
+            "/hooks/skill/custom/pre",
+            "before-recovery"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_skills(registry, [
+               %{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}
+             ])
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-recovery"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "starts when registry reads fail during init and recovers registry-derived subscriptions" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}],
+           hook_defaults_error: {:invalid_return, :hook_defaults_unavailable},
+           list_skills_error: {:invalid_return, :skills_unavailable}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.pre",
+            "/hooks/skill/custom/pre",
+            "before-read-recovery"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = LifecycleSubscriberTestRegistry.set_hook_defaults_error(registry, nil)
+    assert :ok = LifecycleSubscriberTestRegistry.set_list_skills_error(registry, nil)
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-read-recovery"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-read-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "preserves lifecycle subscriptions when registry becomes unavailable during refresh" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})

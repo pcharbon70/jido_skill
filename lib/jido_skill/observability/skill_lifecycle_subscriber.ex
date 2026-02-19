@@ -38,7 +38,11 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     subscription_paths =
       target_subscription_paths(configured_hook_signal_types, registry, cached_hook_defaults)
 
-    with {:ok, subscriptions} <- subscribe_paths(bus_name, %{}, subscription_paths),
+    fallback_subscription_paths =
+      build_target_subscription_paths(configured_hook_signal_types, [])
+
+    with {:ok, subscriptions} <-
+           init_subscriptions(bus_name, subscription_paths, fallback_subscription_paths),
          {:ok, registry_subscription} <- subscribe_registry_updates(bus_name, registry) do
       {:ok,
        %{
@@ -51,9 +55,6 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
        }}
     else
       {:error, reason} ->
-        {:stop, {:subscription_failed, reason}}
-
-      {:error, reason, _subscriptions_after_failure, _paths_added_before_failure} ->
         {:stop, {:subscription_failed, reason}}
     end
   end
@@ -104,6 +105,57 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
       {:error, reason, updated_subscriptions, added_paths} ->
         {:error, reason, updated_subscriptions, added_paths}
+    end
+  end
+
+  defp init_subscriptions(bus_name, subscription_paths, fallback_subscription_paths) do
+    case subscribe_paths(bus_name, %{}, subscription_paths) do
+      {:ok, subscriptions} ->
+        {:ok, subscriptions}
+
+      {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+        _rolled_back =
+          rollback_subscriptions(
+            bus_name,
+            subscriptions_after_failure,
+            paths_added_before_failure
+          )
+
+        maybe_retry_init_subscriptions(
+          bus_name,
+          reason,
+          subscription_paths,
+          fallback_subscription_paths
+        )
+    end
+  end
+
+  defp maybe_retry_init_subscriptions(
+         _bus_name,
+         reason,
+         subscription_paths,
+         fallback_subscription_paths
+       )
+       when subscription_paths == fallback_subscription_paths do
+    {:error, reason}
+  end
+
+  defp maybe_retry_init_subscriptions(
+         bus_name,
+         reason,
+         _subscription_paths,
+         fallback_subscription_paths
+       ) do
+    case subscribe_paths(bus_name, %{}, fallback_subscription_paths) do
+      {:ok, fallback_subscriptions} ->
+        Logger.warning(
+          "failed to initialize registry-derived lifecycle subscriptions; continuing with base subscriptions: #{inspect(reason)}"
+        )
+
+        {:ok, fallback_subscriptions}
+
+      {:error, fallback_reason, _subscriptions_after_failure, _paths_added_before_failure} ->
+        {:error, fallback_reason}
     end
   end
 
@@ -260,8 +312,15 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   defp init_hook_defaults(registry) do
     case safe_hook_defaults(registry) do
-      {:ok, hook_defaults} -> hook_defaults
-      {:error, _reason} -> %{}
+      {:ok, hook_defaults} ->
+        hook_defaults
+
+      {:error, reason} ->
+        Logger.warning(
+          "failed to load lifecycle hook defaults during startup; continuing with empty defaults: #{inspect(reason)}"
+        )
+
+        %{}
     end
   end
 
@@ -286,16 +345,23 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   defp registry_hook_signal_types_for_init(nil, _hook_defaults), do: []
 
   defp registry_hook_signal_types_for_init(registry, hook_defaults) do
-    case safe_list_skills(registry, :empty) do
-      {:ok, skills} -> normalize_registry_hook_signal_types(skills, hook_defaults)
-      {:error, _reason} -> []
+    case safe_list_skills(registry) do
+      {:ok, skills} ->
+        normalize_registry_hook_signal_types(skills, hook_defaults)
+
+      {:error, reason} ->
+        Logger.warning(
+          "failed to load lifecycle registry skills during startup; continuing without registry-derived subscriptions: #{inspect(reason)}"
+        )
+
+        []
     end
   end
 
   defp registry_hook_signal_types_for_refresh(nil, _hook_defaults), do: {:ok, []}
 
   defp registry_hook_signal_types_for_refresh(registry, hook_defaults) do
-    with {:ok, skills} <- safe_list_skills(registry, :error) do
+    with {:ok, skills} <- safe_list_skills(registry) do
       {:ok, normalize_registry_hook_signal_types(skills, hook_defaults)}
     end
   end
@@ -308,23 +374,23 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     |> Enum.uniq()
   end
 
-  defp safe_list_skills(registry, mode) do
+  defp safe_list_skills(registry) do
     case GenServer.call(registry, :list_skills) do
       skills when is_list(skills) ->
         {:ok, skills}
 
       other ->
-        handle_registry_read_error({:list_skills_invalid_result, other}, mode, [])
+        handle_registry_read_error({:list_skills_invalid_result, other})
     end
   rescue
     error ->
-      handle_registry_read_error({:list_skills_exception, error}, mode, [])
+      handle_registry_read_error({:list_skills_exception, error})
   catch
     :exit, reason ->
-      handle_registry_read_error({:list_skills_exit, reason}, mode, [])
+      handle_registry_read_error({:list_skills_exit, reason})
 
     kind, reason ->
-      handle_registry_read_error({:list_skills_error, {kind, reason}}, mode, [])
+      handle_registry_read_error({:list_skills_error, {kind, reason}})
   end
 
   defp safe_hook_defaults(registry) do
@@ -346,8 +412,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       {:error, {:hook_defaults_failed, {kind, reason}}}
   end
 
-  defp handle_registry_read_error(_reason, :empty, fallback), do: {:ok, fallback}
-  defp handle_registry_read_error(reason, :error, _fallback),
+  defp handle_registry_read_error(reason),
     do: {:error, {:registry_read_failed, reason}}
 
   defp skill_hook_signal_types(%{module: module}, hook_defaults) when is_atom(module) do
