@@ -27,7 +27,7 @@
             "required": ["module"],
             "properties": {
               "module": { "type": "string" },
-              "opts": { "type": "object" }
+              "opts": { "type": ["object", "null"] }
             }
           }
         }

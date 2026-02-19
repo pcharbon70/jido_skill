@@ -150,6 +150,44 @@ defmodule JidoSkill.Config.SettingsTest do
     assert settings.hooks.post.bus == :jido_code_bus
   end
 
+  test "accepts middleware entries with nil opts" do
+    tmp_dir = tmp_dir()
+    global_path = Path.join(tmp_dir, "global-settings.json")
+    local_path = Path.join(tmp_dir, "local-settings.json")
+
+    settings_with_nil_middleware_opts = %{
+      "version" => "2.0.0",
+      "signal_bus" => %{
+        "name" => "jido_code_bus",
+        "middleware" => [
+          %{"module" => "Elixir.Jido.Signal.Bus.Middleware.Logger", "opts" => nil}
+        ]
+      },
+      "permissions" => %{"allow" => [], "deny" => [], "ask" => []},
+      "hooks" => %{
+        "pre" => %{
+          "enabled" => true,
+          "signal_type" => "skill/pre",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        },
+        "post" => %{
+          "enabled" => true,
+          "signal_type" => "skill/post",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        }
+      }
+    }
+
+    File.write!(global_path, Jason.encode!(settings_with_nil_middleware_opts))
+
+    assert {:ok, settings} =
+             Settings.load(global_settings_path: global_path, local_settings_path: local_path)
+
+    assert settings.signal_bus.middleware == [{Jido.Signal.Bus.Middleware.Logger, []}]
+  end
+
   defp tmp_dir do
     suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
     path = Path.join(System.tmp_dir!(), "jido_skill_settings_#{suffix}")
