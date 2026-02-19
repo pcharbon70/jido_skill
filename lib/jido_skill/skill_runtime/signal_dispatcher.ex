@@ -502,7 +502,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp safe_list_skills(registry) do
-    {:ok, SkillRegistry.list_skills(registry)}
+    case GenServer.call(registry, :list_skills) do
+      skills when is_list(skills) ->
+        {:ok, skills}
+
+      other ->
+        {:error, {:list_skills_failed, {:invalid_result, other}}}
+    end
   rescue
     error ->
       {:error, {:list_skills_failed, {:exception, error}}}
