@@ -169,4 +169,80 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
     assert signal.type == "skill.pre"
     assert signal.source == "/hooks/skill/pre"
   end
+
+  test "frontmatter enabled true can inherit signal type from disabled global hook" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.inherited.pre",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    global_hooks = %{
+      pre: %{
+        enabled: false,
+        signal_type: "skill/inherited/pre",
+        bus: bus_name,
+        data: %{"scope" => "global"}
+      }
+    }
+
+    frontmatter_hooks = %{
+      pre: %{
+        enabled: true,
+        data: %{"scope" => "frontmatter"}
+      }
+    }
+
+    assert :ok =
+             HookEmitter.emit_pre(
+               "inherit-enabled-skill",
+               "demo/inherit",
+               frontmatter_hooks,
+               global_hooks
+             )
+
+    assert_receive {:signal, signal}, 1_000
+    assert signal.type == "skill.inherited.pre"
+    assert signal.source == "/hooks/skill/inherited/pre"
+    assert signal.data["scope"] == "frontmatter"
+    assert signal.data["skill_name"] == "inherit-enabled-skill"
+  end
+
+  test "frontmatter signal type alone does not override disabled global enablement" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.frontmatter.only",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    global_hooks = %{
+      pre: %{
+        enabled: false,
+        signal_type: "skill/global/pre",
+        bus: bus_name,
+        data: %{}
+      }
+    }
+
+    frontmatter_hooks = %{
+      pre: %{
+        signal_type: "skill/frontmatter/only",
+        data: %{}
+      }
+    }
+
+    assert :ok =
+             HookEmitter.emit_pre(
+               "inherit-disabled-skill",
+               "demo/inherit",
+               frontmatter_hooks,
+               global_hooks
+             )
+
+    refute_receive {:signal, _signal}, 200
+  end
 end
