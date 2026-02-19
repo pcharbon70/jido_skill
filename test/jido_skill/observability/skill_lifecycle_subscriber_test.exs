@@ -592,6 +592,80 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "preserves lifecycle subscriptions when registry becomes unavailable during refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(%{
+        id: {:lifecycle_test_registry, System.unique_integer([:positive])},
+        start:
+          {LifecycleSubscriberTestRegistry, :start_link,
+           [[skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}]]]},
+        restart: :temporary
+      })
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "before-registry-down"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "before-registry-down"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    ref = Process.monitor(registry)
+    :ok = GenServer.stop(registry, :shutdown)
+    assert_receive {:DOWN, ^ref, :process, ^registry, :shutdown}, 1_000
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    assert Process.alive?(subscriber)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-registry-down"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-registry-down"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "does not subscribe disabled hook signal types until they are enabled and reloaded" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     root = tmp_dir("disabled_hook_refresh")
