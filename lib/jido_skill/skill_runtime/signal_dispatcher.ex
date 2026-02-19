@@ -26,6 +26,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
           bus_name: atom() | String.t(),
           registry: GenServer.server(),
           registry_subscription: String.t() | nil,
+          hook_defaults: map(),
           route_subscriptions: %{optional(String.t()) => String.t()},
           route_handlers: route_handlers()
         }
@@ -62,6 +63,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       bus_name: bus_name,
       registry: registry,
       registry_subscription: nil,
+      hook_defaults: %{},
       route_subscriptions: %{},
       route_handlers: %{}
     }
@@ -116,6 +118,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   defp refresh_state(state) do
     with {:ok, handlers} <- build_route_handlers(state.registry),
+         {:ok, hook_defaults} <- safe_hook_defaults(state.registry),
          target_routes = Map.keys(handlers),
          {:ok, route_subscriptions} <-
            sync_route_subscriptions(
@@ -126,7 +129,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       {:ok,
        %{
          state
-         | route_subscriptions: route_subscriptions,
+         | hook_defaults: hook_defaults,
+           route_subscriptions: route_subscriptions,
            route_handlers: handlers
        }}
     end
@@ -280,7 +284,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   defp dispatch_signal(signal, state) do
     handlers = Map.get(state.route_handlers, signal.type, [])
-    global_hooks = safe_hook_defaults(state.registry)
+    global_hooks = Map.get(state, :hook_defaults, %{})
 
     _dispatch_result =
       Enum.reduce_while(handlers, :unhandled, fn skill, _acc ->
@@ -457,13 +461,16 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp safe_hook_defaults(registry) do
-    SkillRegistry.hook_defaults(registry)
+    {:ok, SkillRegistry.hook_defaults(registry)}
   rescue
-    _error ->
-      %{}
+    error ->
+      {:error, {:hook_defaults_failed, {:exception, error}}}
   catch
-    :exit, _reason ->
-      %{}
+    :exit, reason ->
+      {:error, {:hook_defaults_failed, {:exit, reason}}}
+
+    kind, reason ->
+      {:error, {:hook_defaults_failed, {kind, reason}}}
   end
 
   defp safe_list_skills(registry) do
