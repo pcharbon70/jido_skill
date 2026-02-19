@@ -34,7 +34,10 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     bus_name = Keyword.fetch!(opts, :bus_name)
     registry = Keyword.get(opts, :registry)
     configured_hook_signal_types = hook_signal_types(opts)
-    subscription_paths = target_subscription_paths(configured_hook_signal_types, registry)
+    cached_hook_defaults = init_hook_defaults(registry)
+
+    subscription_paths =
+      target_subscription_paths(configured_hook_signal_types, registry, cached_hook_defaults)
 
     with {:ok, subscriptions} <- subscribe_paths(bus_name, %{}, subscription_paths),
          {:ok, registry_subscription} <- subscribe_registry_updates(bus_name, registry) do
@@ -43,6 +46,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
          bus_name: bus_name,
          registry: registry,
          configured_hook_signal_types: configured_hook_signal_types,
+         cached_hook_defaults: cached_hook_defaults,
          subscriptions: subscriptions,
          registry_subscription: registry_subscription
        }}
@@ -159,18 +163,14 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   defp normalize_signal_type(_invalid), do: nil
 
-  defp target_subscription_paths(configured_hook_signal_types, registry) do
-    registry_hook_signal_types =
-      case registry_hook_signal_types(registry, :empty) do
-        {:ok, signal_types} -> signal_types
-        {:error, _reason} -> []
-      end
-
+  defp target_subscription_paths(configured_hook_signal_types, registry, hook_defaults) do
+    registry_hook_signal_types = registry_hook_signal_types_for_init(registry, hook_defaults)
     build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)
   end
 
-  defp target_subscription_paths_for_refresh(configured_hook_signal_types, registry) do
-    with {:ok, registry_hook_signal_types} <- registry_hook_signal_types(registry, :error) do
+  defp target_subscription_paths_for_refresh(configured_hook_signal_types, registry, hook_defaults) do
+    with {:ok, registry_hook_signal_types} <-
+           registry_hook_signal_types_for_refresh(registry, hook_defaults) do
       {:ok, build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)}
     end
   end
@@ -191,10 +191,16 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp refresh_subscriptions(state) do
+    {hook_defaults, cached_hook_defaults, hook_defaults_refresh_error} =
+      resolve_refresh_hook_defaults(state.registry, state.cached_hook_defaults)
+
+    log_hook_defaults_refresh_error(hook_defaults_refresh_error)
+
     with {:ok, target_paths} <-
            target_subscription_paths_for_refresh(
              state.configured_hook_signal_types,
-             state.registry
+             state.registry,
+             hook_defaults
            ) do
       current_paths = Map.keys(state.subscriptions) |> MapSet.new()
       target_path_set = MapSet.new(target_paths)
@@ -205,7 +211,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       case subscribe_paths(state.bus_name, state.subscriptions, paths_to_add) do
         {:ok, after_subscribe} ->
           after_sync = unsubscribe_paths(state.bus_name, after_subscribe, paths_to_remove)
-          {:ok, %{state | subscriptions: after_sync}}
+          {:ok, %{state | subscriptions: after_sync, cached_hook_defaults: cached_hook_defaults}}
 
         {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
           _rolled_back =
@@ -251,20 +257,56 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     unsubscribe_paths(bus_name, subscriptions, paths)
   end
 
-  defp registry_hook_signal_types(nil, _mode), do: {:ok, []}
+  defp init_hook_defaults(nil), do: %{}
 
-  defp registry_hook_signal_types(registry, mode) do
-    with {:ok, hook_defaults} <- safe_hook_defaults(registry, mode),
-         {:ok, skills} <- safe_list_skills(registry, mode) do
-      signal_types =
-        skills
-        |> Enum.flat_map(&skill_hook_signal_types(&1, hook_defaults))
-        |> Enum.map(&normalize_signal_type/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.uniq()
-
-      {:ok, signal_types}
+  defp init_hook_defaults(registry) do
+    case safe_hook_defaults(registry) do
+      {:ok, hook_defaults} -> hook_defaults
+      {:error, _reason} -> %{}
     end
+  end
+
+  defp resolve_refresh_hook_defaults(registry, current_hook_defaults) do
+    case safe_hook_defaults(registry) do
+      {:ok, hook_defaults} ->
+        {hook_defaults, hook_defaults, nil}
+
+      {:error, reason} ->
+        {current_hook_defaults, current_hook_defaults, reason}
+    end
+  end
+
+  defp log_hook_defaults_refresh_error(nil), do: :ok
+
+  defp log_hook_defaults_refresh_error(reason) do
+    Logger.warning(
+      "failed to refresh lifecycle hook defaults; keeping cached defaults: #{inspect(reason)}"
+    )
+  end
+
+  defp registry_hook_signal_types_for_init(nil, _hook_defaults), do: []
+
+  defp registry_hook_signal_types_for_init(registry, hook_defaults) do
+    case safe_list_skills(registry, :empty) do
+      {:ok, skills} -> normalize_registry_hook_signal_types(skills, hook_defaults)
+      {:error, _reason} -> []
+    end
+  end
+
+  defp registry_hook_signal_types_for_refresh(nil, _hook_defaults), do: {:ok, []}
+
+  defp registry_hook_signal_types_for_refresh(registry, hook_defaults) do
+    with {:ok, skills} <- safe_list_skills(registry, :error) do
+      {:ok, normalize_registry_hook_signal_types(skills, hook_defaults)}
+    end
+  end
+
+  defp normalize_registry_hook_signal_types(skills, hook_defaults) do
+    skills
+    |> Enum.flat_map(&skill_hook_signal_types(&1, hook_defaults))
+    |> Enum.map(&normalize_signal_type/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   defp safe_list_skills(registry, mode) do
@@ -280,17 +322,23 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
       handle_registry_read_error({:list_skills_error, {kind, reason}}, mode, [])
   end
 
-  defp safe_hook_defaults(registry, mode) do
-    {:ok, SkillRegistry.hook_defaults(registry)}
+  defp safe_hook_defaults(registry) do
+    case GenServer.call(registry, :hook_defaults) do
+      hook_defaults when is_map(hook_defaults) ->
+        {:ok, hook_defaults}
+
+      other ->
+        {:error, {:hook_defaults_failed, {:invalid_result, other}}}
+    end
   rescue
     error ->
-      handle_registry_read_error({:hook_defaults_exception, error}, mode, %{})
+      {:error, {:hook_defaults_failed, {:exception, error}}}
   catch
     :exit, reason ->
-      handle_registry_read_error({:hook_defaults_exit, reason}, mode, %{})
+      {:error, {:hook_defaults_failed, {:exit, reason}}}
 
     kind, reason ->
-      handle_registry_read_error({:hook_defaults_error, {kind, reason}}, mode, %{})
+      {:error, {:hook_defaults_failed, {kind, reason}}}
   end
 
   defp handle_registry_read_error(_reason, :empty, fallback), do: {:ok, fallback}
