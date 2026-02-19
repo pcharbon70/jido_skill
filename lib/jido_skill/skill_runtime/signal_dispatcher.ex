@@ -465,7 +465,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp safe_hook_defaults(registry) do
-    {:ok, SkillRegistry.hook_defaults(registry)}
+    case GenServer.call(registry, :hook_defaults) do
+      hook_defaults when is_map(hook_defaults) ->
+        {:ok, hook_defaults}
+
+      other ->
+        {:error, {:hook_defaults_failed, {:invalid_result, other}}}
+    end
   rescue
     error ->
       {:error, {:hook_defaults_failed, {:exception, error}}}
