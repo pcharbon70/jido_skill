@@ -8,7 +8,7 @@ defmodule JidoSkill.Application do
     case JidoSkill.Config.load_settings() do
       {:ok, settings} ->
         bus_name = settings.signal_bus.name
-        hook_signal_types = [settings.hooks.pre.signal_type, settings.hooks.post.signal_type]
+        hook_signal_types = lifecycle_signal_types(settings.hooks)
 
         children = [
           {Jido.Signal.Bus,
@@ -30,6 +30,7 @@ defmodule JidoSkill.Application do
            [
              bus_name: bus_name,
              hook_signal_types: hook_signal_types,
+             fallback_to_default_hook_signal_types: false,
              registry: JidoSkill.SkillRuntime.SkillRegistry
            ]}
         ]
@@ -40,5 +41,17 @@ defmodule JidoSkill.Application do
       {:error, reason} ->
         {:error, {:invalid_settings, reason}}
     end
+  end
+
+  defp lifecycle_signal_types(hooks) do
+    [hooks.pre, hooks.post]
+    |> Enum.flat_map(fn hook ->
+      if Map.get(hook, :enabled, true) do
+        [Map.get(hook, :signal_type)]
+      else
+        []
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 end

@@ -94,20 +94,26 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp hook_signal_types(opts) do
-    case Keyword.get(opts, :hook_signal_types, @default_hook_signal_types) do
-      signal_types when is_list(signal_types) ->
+    fallback? = Keyword.get(opts, :fallback_to_default_hook_signal_types, true)
+
+    case Keyword.fetch(opts, :hook_signal_types) do
+      {:ok, signal_types} when is_list(signal_types) ->
         signal_types
         |> Enum.map(&normalize_signal_type/1)
         |> Enum.reject(&is_nil/1)
-        |> case do
-          [] -> @default_hook_signal_types
-          normalized -> normalized
-        end
+        |> maybe_fallback_default_hook_signal_types(fallback?)
 
-      _invalid ->
+      {:ok, _invalid} ->
+        @default_hook_signal_types
+
+      :error ->
         @default_hook_signal_types
     end
   end
+
+  defp maybe_fallback_default_hook_signal_types([], true), do: @default_hook_signal_types
+  defp maybe_fallback_default_hook_signal_types([], false), do: []
+  defp maybe_fallback_default_hook_signal_types(signal_types, _fallback?), do: signal_types
 
   defp normalize_signal_type(type) when is_binary(type) do
     type

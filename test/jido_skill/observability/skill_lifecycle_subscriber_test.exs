@@ -176,6 +176,26 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert metadata.skill_name == "fallback-skill"
   end
 
+  test "supports explicit empty lifecycle subscription list when fallback is disabled" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         hook_signal_types: [],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    :ok = publish_lifecycle_signal(bus_name, "skill.pre", "/hooks/skill/pre", "explicit-empty")
+    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
+  end
+
   test "refreshes lifecycle subscriptions from registry hook signal types after reload" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     root = tmp_dir("lifecycle_registry_refresh")
