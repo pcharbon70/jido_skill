@@ -1,9 +1,13 @@
+defmodule JidoSkill.Observability.TestActions.HookSignal do
+end
+
 defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
   use ExUnit.Case, async: false
 
   alias Jido.Signal
   alias Jido.Signal.Bus
   alias JidoSkill.Observability.SkillLifecycleSubscriber
+  alias JidoSkill.SkillRuntime.SkillRegistry
 
   @telemetry_event [:jido_skill, :skill, :lifecycle]
 
@@ -172,6 +176,74 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert metadata.skill_name == "fallback-skill"
   end
 
+  test "refreshes lifecycle subscriptions from registry hook signal types after reload" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("lifecycle_registry_refresh")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    write_skill(local_root, "registry-base", "registry-base", "demo/base")
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: %{pre: %{}, post: %{}},
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber, [name: nil, bus_name: bus_name, registry: registry]}
+    )
+
+    attach_handler!()
+
+    assert :ok =
+             publish_lifecycle_signal(
+               bus_name,
+               "skill.custom.pre",
+               "/hooks/skill/custom/pre",
+               "before-reload"
+             )
+
+    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
+
+    write_skill(
+      local_root,
+      "registry-custom",
+      "registry-custom",
+      "demo/custom",
+      pre_signal_type: "skill/custom/pre"
+    )
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-reload"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-reload"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "ignores non-signal messages" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})
@@ -201,5 +273,72 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
 
   def handle_telemetry(event_name, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry, event_name, measurements, metadata})
+  end
+
+  defp publish_lifecycle_signal(bus_name, type, source, skill_name) do
+    with {:ok, signal} <-
+           Signal.new(
+             type,
+             %{"phase" => "pre", "skill_name" => skill_name, "route" => "demo/run"},
+             source: source
+           ),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      _ ->
+        :error
+    end
+  end
+
+  defp write_skill(root, dir_name, skill_name, route, opts \\ []) do
+    skill_dir = Path.join([root, "skills", dir_name])
+    File.mkdir_p!(skill_dir)
+
+    hooks_block =
+      case Keyword.get(opts, :pre_signal_type) do
+        nil ->
+          ""
+
+        signal_type ->
+          "  hooks:\n    pre:\n      signal_type: \"#{signal_type}\"\n"
+      end
+
+    content = """
+    ---
+    name: #{skill_name}
+    description: Subscriber registry test skill #{skill_name}
+    version: 1.0.0
+    jido:
+      actions:
+        - JidoSkill.Observability.TestActions.HookSignal
+      router:
+        - "#{route}": HookSignal
+    #{hooks_block}---
+
+    # #{skill_name}
+    """
+
+    File.write!(Path.join(skill_dir, "SKILL.md"), content)
+  end
+
+  defp tmp_dir(prefix) do
+    suffix = Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+    path = Path.join(System.tmp_dir!(), "jido_skill_#{prefix}_#{suffix}")
+
+    File.rm_rf!(path)
+    File.mkdir_p!(path)
+    path
+  end
+
+  defp assert_eventually(fun, attempts \\ 25)
+  defp assert_eventually(_fun, 0), do: flunk("condition did not become true")
+
+  defp assert_eventually(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(20)
+      assert_eventually(fun, attempts - 1)
+    end
   end
 end
