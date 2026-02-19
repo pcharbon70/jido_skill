@@ -22,7 +22,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
           "skill_name" => "pdf-processor",
           "route" => "pdf/extract/text"
         },
-        source: "/hooks/skill.pre"
+        source: "/hooks/skill/pre"
       )
 
     {:ok, post_signal} =
@@ -34,7 +34,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
           "route" => "pdf/extract/text",
           "status" => "error"
         },
-        source: "/hooks/skill.post"
+        source: "/hooks/skill/post"
       )
 
     assert {:ok, _} = Bus.publish(bus_name, [pre_signal])
@@ -42,6 +42,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
 
     assert_receive {:telemetry, @telemetry_event, %{count: 1}, pre_metadata}, 1_000
     assert pre_metadata.type == "skill.pre"
+    assert pre_metadata.source == "/hooks/skill/pre"
     assert pre_metadata.bus == bus_name
     assert pre_metadata.phase == "pre"
     assert pre_metadata.skill_name == "pdf-processor"
@@ -50,6 +51,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
 
     assert_receive {:telemetry, @telemetry_event, %{count: 1}, post_metadata}, 1_000
     assert post_metadata.type == "skill.post"
+    assert post_metadata.source == "/hooks/skill/post"
     assert post_metadata.bus == bus_name
     assert post_metadata.phase == "post"
     assert post_metadata.skill_name == "pdf-processor"
@@ -76,13 +78,14 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
           "tools" => ["Bash(git:*)"],
           "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
         },
-        source: "/permissions/skill.permission.blocked"
+        source: "/permissions/skill/permission/blocked"
       )
 
     assert {:ok, _} = Bus.publish(bus_name, [blocked_signal])
 
     assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
     assert metadata.type == "skill.permission.blocked"
+    assert metadata.source == "/permissions/skill/permission/blocked"
     assert metadata.bus == bus_name
     assert metadata.phase == nil
     assert metadata.skill_name == "dispatcher-ask"

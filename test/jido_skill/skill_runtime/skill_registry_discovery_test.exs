@@ -125,6 +125,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
 
     assert_receive {:signal, signal}, 1_000
     assert signal.type == "skill.registry.updated"
+    assert signal.source == "/skill_registry"
 
     count = Map.get(signal.data, :count) || Map.get(signal.data, "count")
     skills = Map.get(signal.data, :skills) || Map.get(signal.data, "skills")
