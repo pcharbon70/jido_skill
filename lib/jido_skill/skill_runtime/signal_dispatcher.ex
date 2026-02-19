@@ -194,20 +194,25 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     routes_to_remove = MapSet.difference(current_routes, target_route_set) |> MapSet.to_list()
     routes_to_add = MapSet.difference(target_route_set, current_routes) |> MapSet.to_list()
 
-    unsubscribe_routes(bus_name, current_subscriptions, routes_to_remove)
-    |> then(fn
-      {:ok, after_unsubscribe} ->
-        subscribe_routes(bus_name, after_unsubscribe, routes_to_add)
+    case subscribe_routes(bus_name, current_subscriptions, routes_to_add) do
+      {:ok, after_subscribe} ->
+        after_sync = unsubscribe_routes(bus_name, after_subscribe, routes_to_remove)
+        {:ok, after_sync}
 
-      {:error, reason} ->
+      {:error, reason, subscriptions_after_failure, routes_added_before_failure} ->
+        _rolled_back =
+          rollback_route_subscriptions(
+            bus_name,
+            subscriptions_after_failure,
+            routes_added_before_failure
+          )
+
         {:error, reason}
-    end)
+    end
   end
 
   defp unsubscribe_routes(bus_name, subscriptions, routes) do
-    Enum.reduce_while(routes, {:ok, subscriptions}, fn route, {:ok, acc} ->
-      {:cont, {:ok, unsubscribe_route(bus_name, acc, route)}}
-    end)
+    Enum.reduce(routes, subscriptions, &unsubscribe_route(bus_name, &2, &1))
   end
 
   defp unsubscribe_route(bus_name, subscriptions, route) do
@@ -231,19 +236,31 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   end
 
   defp subscribe_routes(bus_name, subscriptions, routes) do
-    Enum.reduce_while(routes, {:ok, subscriptions}, fn route, {:ok, acc} ->
+    routes
+    |> Enum.reduce_while({:ok, subscriptions, []}, fn route, {:ok, acc, added_routes} ->
       case subscribe(bus_name, route) do
         {:ok, subscription_id} ->
-          {:cont, {:ok, Map.put(acc, route, subscription_id)}}
+          {:cont, {:ok, Map.put(acc, route, subscription_id), [route | added_routes]}}
 
         {:error, reason} ->
-          {:halt, {:error, {:route_subscribe_failed, route, reason}}}
+          {:halt, {:error, {:route_subscribe_failed, route, reason}, acc, added_routes}}
       end
     end)
+    |> case do
+      {:ok, updated_subscriptions, _added_routes} ->
+        {:ok, updated_subscriptions}
+
+      {:error, reason, updated_subscriptions, added_routes} ->
+        {:error, reason, updated_subscriptions, added_routes}
+    end
   end
 
   defp subscribe(bus_name, path) do
     Bus.subscribe(bus_name, path, dispatch: {:pid, target: self(), delivery_mode: :async})
+  end
+
+  defp rollback_route_subscriptions(bus_name, subscriptions, added_routes) do
+    unsubscribe_routes(bus_name, subscriptions, added_routes)
   end
 
   defp dispatch_signal(signal, state) do
