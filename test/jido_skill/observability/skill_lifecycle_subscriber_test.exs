@@ -244,6 +244,86 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "does not subscribe disabled hook signal types until they are enabled and reloaded" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("disabled_hook_refresh")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    write_skill(local_root, "registry-base", "registry-base", "demo/base")
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: %{pre: %{}, post: %{}},
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber, [name: nil, bus_name: bus_name, registry: registry]}
+    )
+
+    attach_handler!()
+
+    write_skill(
+      local_root,
+      "registry-disabled",
+      "registry-disabled",
+      "demo/disabled",
+      pre_signal_type: "skill/custom/disabled",
+      pre_enabled: false
+    )
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert :ok =
+             publish_lifecycle_signal(
+               bus_name,
+               "skill.custom.disabled",
+               "/hooks/skill/custom/disabled",
+               "disabled"
+             )
+
+    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
+
+    write_skill(
+      local_root,
+      "registry-disabled",
+      "registry-disabled",
+      "demo/disabled",
+      pre_signal_type: "skill/custom/disabled",
+      pre_enabled: true
+    )
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.disabled",
+          "/hooks/skill/custom/disabled",
+          "enabled"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.disabled" and metadata.skill_name == "enabled"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "ignores non-signal messages" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})
@@ -300,7 +380,16 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
           ""
 
         signal_type ->
-          "  hooks:\n    pre:\n      signal_type: \"#{signal_type}\"\n"
+          enabled_line =
+            case Keyword.fetch(opts, :pre_enabled) do
+              {:ok, value} ->
+                "      enabled: #{value}\n"
+
+              :error ->
+                ""
+            end
+
+          "  hooks:\n    pre:\n      signal_type: \"#{signal_type}\"\n#{enabled_line}"
       end
 
     content = """

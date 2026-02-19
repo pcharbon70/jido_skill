@@ -235,10 +235,21 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
     case hook do
       map when is_map(map) ->
-        Map.get(map, :signal_type) || Map.get(map, "signal_type")
+        if hook_enabled?(map) do
+          Map.get(map, :signal_type) || Map.get(map, "signal_type")
+        else
+          nil
+        end
 
       _ ->
         nil
+    end
+  end
+
+  defp hook_enabled?(hook) do
+    case Map.get(hook, :enabled) || Map.get(hook, "enabled") do
+      false -> false
+      _ -> true
     end
   end
 
