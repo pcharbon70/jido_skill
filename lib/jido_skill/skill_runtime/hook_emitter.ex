@@ -49,7 +49,9 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
   defp emit(%{enabled: false}, _runtime_data), do: :ok
 
   defp emit(hook, runtime_data) do
-    signal_type = hook |> Map.get(:signal_type) |> normalize_signal_type()
+    configured_signal_type = Map.get(hook, :signal_type)
+    signal_type = normalize_signal_type(configured_signal_type)
+    source_signal_type = normalize_signal_source_type(configured_signal_type)
     bus_name = hook |> Map.get(:bus, :jido_code_bus) |> normalize_bus_name()
 
     payload =
@@ -62,7 +64,8 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
       Logger.warning("hook configuration missing signal_type: #{inspect(hook)}")
       :ok
     else
-      with {:ok, signal} <- Signal.new(signal_type, payload, source: "/hooks/#{signal_type}"),
+      with {:ok, signal} <-
+             Signal.new(signal_type, payload, source: "/hooks/#{source_signal_type}"),
            {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
         :ok
       else
@@ -186,6 +189,9 @@ defmodule JidoSkill.SkillRuntime.HookEmitter do
 
   defp normalize_signal_type(nil), do: nil
   defp normalize_signal_type(type), do: String.replace(type, "/", ".")
+
+  defp normalize_signal_source_type(nil), do: nil
+  defp normalize_signal_source_type(type), do: String.replace(type, ".", "/")
 
   defp safe_to_existing_atom(name) do
     {:ok, String.to_existing_atom(name)}

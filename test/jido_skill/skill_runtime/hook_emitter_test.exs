@@ -30,6 +30,7 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
 
     assert_receive {:signal, signal}, 1_000
     assert signal.type == "skill.pre"
+    assert signal.source == "/hooks/skill/pre"
 
     assert signal.data["source"] == "pdf-processor"
     assert signal.data["route_copy"] == "pdf/extract/text"
@@ -112,6 +113,7 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
 
     assert_receive {:signal, signal}, 1_000
     assert signal.type == "skill.pre"
+    assert signal.source == "/hooks/skill/pre"
     assert signal.data["source"] == "local"
     assert signal.data["route_template"] == "pdf/extract/tables"
   end
@@ -138,7 +140,33 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
 
     assert_receive {:signal, signal}, 1_000
     assert signal.type == "skill.pre"
+    assert signal.source == "/hooks/skill/pre"
     assert signal.data["origin"] == "frontmatter"
     assert signal.data["skill_name"] == "pdf-processor"
+  end
+
+  test "hook source uses slash paths when signal type is dot-delimited" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.pre",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    global_hooks = %{
+      pre: %{
+        enabled: true,
+        signal_type: "skill.pre",
+        bus: bus_name,
+        data: %{}
+      }
+    }
+
+    assert :ok = HookEmitter.emit_pre("pdf-processor", "pdf/extract/text", nil, global_hooks)
+
+    assert_receive {:signal, signal}, 1_000
+    assert signal.type == "skill.pre"
+    assert signal.source == "/hooks/skill/pre"
   end
 end
