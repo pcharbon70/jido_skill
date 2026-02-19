@@ -245,4 +245,48 @@ defmodule JidoSkill.SkillRuntime.HookEmitterTest do
 
     refute_receive {:signal, _signal}, 200
   end
+
+  test "invalid signal_type is ignored without crashing" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.pre",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    global_hooks = %{
+      pre: %{
+        enabled: true,
+        signal_type: 42,
+        bus: bus_name,
+        data: %{}
+      }
+    }
+
+    assert :ok = HookEmitter.emit_pre("invalid-signal", "demo/invalid", nil, global_hooks)
+    refute_receive {:signal, _signal}, 200
+  end
+
+  test "invalid bus is ignored without crashing" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(bus_name, "skill.pre",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    global_hooks = %{
+      pre: %{
+        enabled: true,
+        signal_type: "skill/pre",
+        bus: 123,
+        data: %{}
+      }
+    }
+
+    assert :ok = HookEmitter.emit_pre("invalid-bus", "demo/invalid", nil, global_hooks)
+    refute_receive {:signal, _signal}, 200
+  end
 end
