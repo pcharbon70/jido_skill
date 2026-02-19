@@ -252,6 +252,55 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
   end
 
+  test "ignores invalid configured lifecycle signal types while keeping valid entries" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         hook_signal_types: ["skill/custom/pre", "skill//broken", "", 123],
+         fallback_to_default_hook_signal_types: false
+       ]}
+    )
+
+    attach_handler!()
+
+    :ok =
+      publish_lifecycle_signal(bus_name, "skill.custom.pre", "/hooks/skill/custom/pre", "valid")
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.custom.pre"
+    assert metadata.skill_name == "valid"
+
+    :ok = publish_lifecycle_signal(bus_name, "skill.pre", "/hooks/skill/pre", "default")
+    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _default_metadata}, 200
+  end
+
+  test "falls back to defaults when configured lifecycle signal types are all invalid" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         hook_signal_types: ["skill//broken", "", 123]
+       ]}
+    )
+
+    attach_handler!()
+
+    :ok = publish_lifecycle_signal(bus_name, "skill.pre", "/hooks/skill/pre", "fallback-invalid")
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.pre"
+    assert metadata.skill_name == "fallback-invalid"
+  end
+
   test "subscribes to inherited global signal type when frontmatter explicitly enables hook" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     root = tmp_dir("hook_inherit_enabled")

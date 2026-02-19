@@ -110,7 +110,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     case Keyword.fetch(opts, :hook_signal_types) do
       {:ok, signal_types} when is_list(signal_types) ->
         signal_types
-        |> Enum.map(&normalize_signal_type/1)
+        |> Enum.map(&normalize_configured_signal_type/1)
         |> Enum.reject(&is_nil/1)
         |> maybe_fallback_default_hook_signal_types(fallback?)
 
@@ -125,6 +125,28 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   defp maybe_fallback_default_hook_signal_types([], true), do: @default_hook_signal_types
   defp maybe_fallback_default_hook_signal_types([], false), do: []
   defp maybe_fallback_default_hook_signal_types(signal_types, _fallback?), do: signal_types
+
+  defp normalize_configured_signal_type(type) when is_binary(type) do
+    type
+    |> String.trim()
+    |> case do
+      "" ->
+        nil
+
+      value ->
+        if valid_configured_signal_type?(value) do
+          value
+        else
+          nil
+        end
+    end
+  end
+
+  defp normalize_configured_signal_type(_invalid), do: nil
+
+  defp valid_configured_signal_type?(type) do
+    Regex.match?(~r/^[a-z0-9_]+(?:[\/.][a-z0-9_]+)*$/, type)
+  end
 
   defp normalize_signal_type(type) when is_binary(type) do
     type
