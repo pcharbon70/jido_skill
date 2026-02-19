@@ -113,7 +113,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
     state = %{
       skills: Keyword.get(opts, :skills, []),
       hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
-      hook_defaults_error: Keyword.get(opts, :hook_defaults_error)
+      hook_defaults_error: Keyword.get(opts, :hook_defaults_error),
+      list_skills_error: Keyword.get(opts, :list_skills_error)
     }
 
     GenServer.start_link(__MODULE__, state)
@@ -121,12 +122,27 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
   def set_hook_defaults_error(server, value), do: GenServer.call(server, {:set_hook_defaults_error, value})
+  def set_list_skills_error(server, value), do: GenServer.call(server, {:set_list_skills_error, value})
 
   @impl GenServer
   def init(state), do: {:ok, state}
 
   @impl GenServer
-  def handle_call(:list_skills, _from, state), do: {:reply, state.skills, state}
+  def handle_call(:list_skills, _from, state) do
+    case state.list_skills_error do
+      nil ->
+        {:reply, state.skills, state}
+
+      {:invalid_return, value} ->
+        {:reply, value, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
+  end
 
   @impl GenServer
   def handle_call(:hook_defaults, _from, state) do
@@ -153,6 +169,11 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   @impl GenServer
   def handle_call({:set_hook_defaults_error, value}, _from, state) do
     {:reply, :ok, %{state | hook_defaults_error: value}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_list_skills_error, value}, _from, state) do
+    {:reply, :ok, %{state | list_skills_error: value}}
   end
 end
 
@@ -424,6 +445,44 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
     assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_registry_down")
     assert_receive {:action_ran, "after_registry_down"}, 1_000
+  end
+
+  test "preserves existing routes when list_skills returns invalid data during refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry, [skills: [valid_dispatcher_skill_entry()]]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_invalid_registry")
+    assert_receive {:action_ran, "before_invalid_registry"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_list_skills_error(
+               registry,
+               {:invalid_return, :skills_unavailable}
+             )
+
+    assert {:error, {:list_skills_failed, {:invalid_result, :skills_unavailable}}} =
+             SignalDispatcher.refresh(dispatcher)
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_invalid_registry")
+    assert_receive {:action_ran, "after_invalid_registry"}, 1_000
   end
 
   test "refreshes routes while keeping cached hook defaults when hook defaults fail" do
