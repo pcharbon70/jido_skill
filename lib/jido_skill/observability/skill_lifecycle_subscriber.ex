@@ -247,9 +247,22 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   end
 
   defp hook_enabled?(hook) do
-    case Map.get(hook, :enabled) || Map.get(hook, "enabled") do
+    case map_get_optional(hook, :enabled) do
       false -> false
       _ -> true
+    end
+  end
+
+  defp map_get_optional(map, key) do
+    cond do
+      Map.has_key?(map, key) ->
+        Map.get(map, key)
+
+      Map.has_key?(map, Atom.to_string(key)) ->
+        Map.get(map, Atom.to_string(key))
+
+      true ->
+        nil
     end
   end
 
