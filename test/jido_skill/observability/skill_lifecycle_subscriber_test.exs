@@ -95,6 +95,83 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert metadata.tools == ["Bash(git:*)"]
   end
 
+  test "subscribes to configured lifecycle signal types" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    start_supervised!(
+      {SkillLifecycleSubscriber,
+       [
+         name: nil,
+         bus_name: bus_name,
+         hook_signal_types: ["skill/custom/pre", "skill/custom/post"]
+       ]}
+    )
+
+    attach_handler!()
+
+    {:ok, custom_pre_signal} =
+      Signal.new(
+        "skill.custom.pre",
+        %{
+          "phase" => "pre",
+          "skill_name" => "custom-skill",
+          "route" => "custom/run"
+        },
+        source: "/hooks/skill/custom/pre"
+      )
+
+    assert {:ok, _} = Bus.publish(bus_name, [custom_pre_signal])
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.custom.pre"
+    assert metadata.source == "/hooks/skill/custom/pre"
+    assert metadata.skill_name == "custom-skill"
+
+    {:ok, default_pre_signal} =
+      Signal.new(
+        "skill.pre",
+        %{
+          "phase" => "pre",
+          "skill_name" => "default-skill",
+          "route" => "default/run"
+        },
+        source: "/hooks/skill/pre"
+      )
+
+    assert {:ok, _} = Bus.publish(bus_name, [default_pre_signal])
+
+    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _default_metadata}, 200
+  end
+
+  test "falls back to default lifecycle subscriptions when configured list is empty" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    start_supervised!(
+      {SkillLifecycleSubscriber, [name: nil, bus_name: bus_name, hook_signal_types: []]}
+    )
+
+    attach_handler!()
+
+    {:ok, pre_signal} =
+      Signal.new(
+        "skill.pre",
+        %{
+          "phase" => "pre",
+          "skill_name" => "fallback-skill",
+          "route" => "fallback/run"
+        },
+        source: "/hooks/skill/pre"
+      )
+
+    assert {:ok, _} = Bus.publish(bus_name, [pre_signal])
+
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+    assert metadata.type == "skill.pre"
+    assert metadata.skill_name == "fallback-skill"
+  end
+
   test "ignores non-signal messages" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})

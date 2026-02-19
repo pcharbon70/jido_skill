@@ -2,12 +2,16 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   @moduledoc """
   Subscribes to skill lifecycle and permission signals and emits telemetry.
 
-  Phase 8 enriches telemetry metadata with lifecycle fields and bus context.
+  Phase 22 supports configurable lifecycle signal subscriptions derived from
+  runtime hook settings.
   """
 
   use GenServer
 
   alias Jido.Signal.Bus
+
+  @default_hook_signal_types ["skill/pre", "skill/post"]
+  @permission_blocked_signal_type "skill/permission/blocked"
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -24,12 +28,23 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   def init(opts) do
     bus_name = Keyword.fetch!(opts, :bus_name)
 
-    with {:ok, pre_sub} <- subscribe(bus_name, normalize_path("skill/pre")),
-         {:ok, post_sub} <- subscribe(bus_name, normalize_path("skill/post")),
-         {:ok, permission_sub} <- subscribe(bus_name, normalize_path("skill/permission/blocked")) do
-      {:ok, %{bus_name: bus_name, subscriptions: [pre_sub, post_sub, permission_sub]}}
-    else
-      {:error, reason} -> {:stop, {:subscription_failed, reason}}
+    lifecycle_paths =
+      opts
+      |> hook_signal_types()
+      |> Enum.map(&normalize_path/1)
+      |> Enum.reject(&is_nil/1)
+
+    subscription_paths =
+      lifecycle_paths
+      |> Kernel.++([normalize_path(@permission_blocked_signal_type)])
+      |> Enum.uniq()
+
+    case subscribe_all(bus_name, subscription_paths) do
+      {:ok, subscriptions} ->
+        {:ok, %{bus_name: bus_name, subscriptions: subscriptions}}
+
+      {:error, reason} ->
+        {:stop, {:subscription_failed, reason}}
     end
   end
 
@@ -46,7 +61,51 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     Bus.subscribe(bus_name, path, dispatch: {:pid, target: self(), delivery_mode: :async})
   end
 
-  defp normalize_path(path), do: String.replace(path, "/", ".")
+  defp subscribe_all(bus_name, paths) do
+    Enum.reduce_while(paths, {:ok, []}, fn path, {:ok, subscriptions} ->
+      case subscribe(bus_name, path) do
+        {:ok, subscription} ->
+          {:cont, {:ok, [subscription | subscriptions]}}
+
+        {:error, reason} ->
+          {:halt, {:error, {:subscribe_failed, path, reason}}}
+      end
+    end)
+    |> then(fn
+      {:ok, subscriptions} -> {:ok, Enum.reverse(subscriptions)}
+      {:error, reason} -> {:error, reason}
+    end)
+  end
+
+  defp hook_signal_types(opts) do
+    case Keyword.get(opts, :hook_signal_types, @default_hook_signal_types) do
+      signal_types when is_list(signal_types) ->
+        signal_types
+        |> Enum.map(&normalize_signal_type/1)
+        |> Enum.reject(&is_nil/1)
+        |> case do
+          [] -> @default_hook_signal_types
+          normalized -> normalized
+        end
+
+      _invalid ->
+        @default_hook_signal_types
+    end
+  end
+
+  defp normalize_signal_type(type) when is_binary(type) do
+    type
+    |> String.trim()
+    |> case do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp normalize_signal_type(_invalid), do: nil
+
+  defp normalize_path(path) when is_binary(path), do: String.replace(path, "/", ".")
+  defp normalize_path(_invalid), do: nil
 
   defp emit_telemetry(signal, bus_name) do
     data = ensure_map(signal.data)
