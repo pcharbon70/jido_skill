@@ -328,6 +328,81 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "removes lifecycle subscription when registry hook signal type is removed" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("hook_remove_refresh")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+
+    write_skill(local_root, "registry-base", "registry-base", "demo/base")
+
+    write_skill(
+      local_root,
+      "registry-custom",
+      "registry-custom",
+      "demo/custom",
+      pre_signal_type: "skill/custom/pre"
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           hook_defaults: %{pre: %{}, post: %{}},
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    start_supervised!(
+      {SkillLifecycleSubscriber, [name: nil, bus_name: bus_name, registry: registry]}
+    )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "before-remove"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "before-remove"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    File.rm_rf!(Path.join([local_root, "skills", "registry-custom"]))
+    assert :ok = SkillRegistry.reload(registry)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.pre",
+            "/hooks/skill/custom/pre",
+            "after-remove"
+          )
+      end,
+      8,
+      50
+    )
+  end
+
   test "ignores non-signal messages" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})
@@ -440,5 +515,15 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       publish_fun.()
       refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, timeout_ms
     end)
+  end
+
+  defp drain_telemetry_messages do
+    receive do
+      {:telemetry, @telemetry_event, _measurements, _metadata} ->
+        drain_telemetry_messages()
+    after
+      0 ->
+        :ok
+    end
   end
 end
