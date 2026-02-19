@@ -284,15 +284,19 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
 
     assert :ok = SkillRegistry.reload(registry)
 
-    assert :ok =
-             publish_lifecycle_signal(
-               bus_name,
-               "skill.custom.disabled",
-               "/hooks/skill/custom/disabled",
-               "disabled"
-             )
-
-    refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, 200
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.disabled",
+            "/hooks/skill/custom/disabled",
+            "disabled"
+          )
+      end,
+      8,
+      50
+    )
 
     write_skill(
       local_root,
@@ -429,5 +433,12 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       Process.sleep(20)
       assert_eventually(fun, attempts - 1)
     end
+  end
+
+  defp assert_unobserved_over_time(publish_fun, attempts, timeout_ms) do
+    Enum.each(1..attempts, fn _ ->
+      publish_fun.()
+      refute_receive {:telemetry, @telemetry_event, %{count: 1}, _metadata}, timeout_ms
+    end)
   end
 end
