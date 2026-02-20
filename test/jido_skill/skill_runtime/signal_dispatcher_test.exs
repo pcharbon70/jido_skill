@@ -117,7 +117,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
       list_skills_error: Keyword.get(opts, :list_skills_error)
     }
 
-    GenServer.start_link(__MODULE__, state)
+    name = Keyword.get(opts, :name)
+
+    if is_nil(name) do
+      GenServer.start_link(__MODULE__, state)
+    else
+      GenServer.start_link(__MODULE__, state, name: name)
+    end
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
@@ -477,6 +483,45 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
     assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_recovery")
     assert_receive {:action_ran, "after_recovery"}, 1_000
+  end
+
+  test "starts when registry is unavailable during init and recovers after registry starts" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"dispatcher_registry_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry_name]}
+      )
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_registry_start")
+    refute_receive {:action_ran, "before_registry_start"}, 200
+
+    _registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           name: registry_name,
+           skills: [valid_dispatcher_skill_entry()],
+           hook_defaults: hook_defaults(bus_name)
+         ]}
+      )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+
+    assert_eventually(fn ->
+      SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    end)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_registry_start")
+    assert_receive {:action_ran, "after_registry_start"}, 1_000
   end
 
   test "starts with routes when initial hook defaults read fails and recovers hook emission on refresh" do
