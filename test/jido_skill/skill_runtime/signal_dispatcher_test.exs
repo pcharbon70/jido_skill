@@ -762,6 +762,51 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_invalid_registry"}, 1_000
   end
 
+  test "preserves existing routes when list_skills raises during refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(%{
+        id: {:dispatcher_raise_refresh_registry, System.unique_integer([:positive])},
+        start:
+          {SignalDispatcherTestRegistry, :start_link, [[skills: [valid_dispatcher_skill_entry()]]]},
+        restart: :temporary
+      })
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_raise_refresh")
+    assert_receive {:action_ran, "before_raise_refresh"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_list_skills_error(
+               registry,
+               {:raise, RuntimeError.exception("skills_unavailable")}
+             )
+
+    ref = Process.monitor(registry)
+
+    assert {:error, {:list_skills_failed, {:exit, _reason}}} =
+             SignalDispatcher.refresh(dispatcher)
+
+    assert_receive {:DOWN, ^ref, :process, ^registry, _reason}, 1_000
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_raise_refresh")
+    assert_receive {:action_ran, "after_raise_refresh"}, 1_000
+  end
+
   test "refreshes routes while keeping cached hook defaults when hook defaults fail" do
     set_notify_pid!()
 
