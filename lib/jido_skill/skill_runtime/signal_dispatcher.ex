@@ -546,7 +546,14 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       handle_list_skills_read_error({kind, reason}, mode, [])
   end
 
-  defp handle_list_skills_read_error(_reason, :empty, fallback), do: {:ok, fallback}
+  defp handle_list_skills_read_error(reason, :empty, fallback) do
+    Logger.warning(
+      "failed to load dispatcher routes during startup; continuing with empty routes: #{inspect(reason)}"
+    )
+
+    {:ok, fallback}
+  end
+
   defp handle_list_skills_read_error(reason, :error, _fallback),
     do: {:error, {:list_skills_failed, reason}}
 
