@@ -75,7 +75,13 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
       list_skills_error: Keyword.get(opts, :list_skills_error)
     }
 
-    GenServer.start_link(__MODULE__, state)
+    name = Keyword.get(opts, :name)
+
+    if is_nil(name) do
+      GenServer.start_link(__MODULE__, state)
+    else
+      GenServer.start_link(__MODULE__, state, name: name)
+    end
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
@@ -872,6 +878,73 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
           metadata.type == "skill.default.custom.pre" and
             metadata.skill_name == "after-hook-default-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "starts when registry is unavailable during init and recovers registry-derived subscriptions" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"lifecycle_registry_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry_name,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.custom.pre",
+            "/hooks/skill/custom/pre",
+            "before-registry-start"
+          )
+      end,
+      6,
+      60
+    )
+
+    _registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           name: registry_name,
+           skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}]
+         ]}
+      )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-registry-start"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and metadata.skill_name == "after-registry-start"
       after
         80 ->
           false
