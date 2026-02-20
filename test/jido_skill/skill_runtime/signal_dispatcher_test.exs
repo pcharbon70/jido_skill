@@ -485,6 +485,59 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_recovery"}, 1_000
   end
 
+  test "starts with empty routes when initial list_skills raises and recovers on refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"dispatcher_raise_registry_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    _failing_registry =
+      start_supervised!(
+        %{
+          id: {:dispatcher_raise_registry, System.unique_integer([:positive])},
+          start:
+            {SignalDispatcherTestRegistry, :start_link,
+             [
+               [
+                 name: registry_name,
+                 skills: [valid_dispatcher_skill_entry()],
+                 list_skills_error: {:raise, RuntimeError.exception("skills_unavailable")}
+               ]
+             ]},
+          restart: :temporary
+        }
+      )
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry_name]}
+      )
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_raise_recovery")
+    refute_receive {:action_ran, "before_raise_recovery"}, 200
+
+    _recovered_registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [name: registry_name, skills: [valid_dispatcher_skill_entry()]]}
+      )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+
+    assert_eventually(fn ->
+      SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    end)
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_raise_recovery")
+    assert_receive {:action_ran, "after_raise_recovery"}, 1_000
+  end
+
   test "starts when registry is unavailable during init and recovers after registry starts" do
     set_notify_pid!()
 
