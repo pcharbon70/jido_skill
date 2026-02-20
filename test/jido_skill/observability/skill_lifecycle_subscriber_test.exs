@@ -968,6 +968,97 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "starts without inherited lifecycle subscriptions when initial hook defaults raises and recovers on refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"lifecycle_hook_raise_registry_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    _failing_registry =
+      start_supervised!(%{
+        id: {:lifecycle_hook_raise_registry, System.unique_integer([:positive])},
+        start:
+          {LifecycleSubscriberTestRegistry, :start_link,
+           [
+             [
+               name: registry_name,
+               skills: [%{module: JidoSkill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+               hook_defaults: %{
+                 pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
+                 post: %{enabled: true, signal_type: "skill/post"}
+               },
+               hook_defaults_error: {:raise, RuntimeError.exception("hook_defaults_unavailable")}
+             ]
+           ]},
+        restart: :temporary
+      })
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry_name,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "before-hook-default-raise-recovery"
+          )
+      end,
+      6,
+      60
+    )
+
+    _recovered_registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           name: registry_name,
+           skills: [%{module: JidoSkill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           hook_defaults: %{
+             pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
+             post: %{enabled: true, signal_type: "skill/post"}
+           }
+         ]}
+      )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.default.custom.pre",
+          "/hooks/skill/default/custom/pre",
+          "after-hook-default-raise-recovery"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.default.custom.pre" and
+            metadata.skill_name == "after-hook-default-raise-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "starts when registry is unavailable during init and recovers registry-derived subscriptions" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     registry_name = :"lifecycle_registry_#{System.unique_integer([:positive])}"
