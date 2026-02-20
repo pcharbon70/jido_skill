@@ -183,6 +183,32 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   end
 end
 
+defmodule JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia do
+  def whereis_name({registry, lookup_plan}) do
+    {lookup_index, fail_lookup?} =
+      Agent.get_and_update(lookup_plan, fn %{count: count, fail_on: fail_on} = state ->
+        next = count + 1
+        {{next, MapSet.member?(fail_on, next)}, %{state | count: next}}
+      end)
+
+    if fail_lookup? do
+      raise ArgumentError, "simulated registry lookup failure at call #{lookup_index}"
+    end
+
+    registry
+  end
+
+  def register_name(_name, _pid), do: :yes
+  def unregister_name(_name), do: :ok
+
+  def send({registry, _lookup_plan}, message) when is_pid(registry) do
+    Kernel.send(registry, message)
+    registry
+  end
+
+  def send(_name, _message), do: :badarg
+end
+
 defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
   use ExUnit.Case, async: false
 
@@ -985,6 +1011,68 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
     assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_raise_registry_update")
     assert_receive {:action_ran, "after_raise_registry_update"}, 1_000
+  end
+
+  test "refreshes routes while keeping cached hook defaults when hook defaults call raises exceptions" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_exception_hook_failure")
+    assert_receive {:action_ran, "before_exception_hook_failure"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+
+    lookup_plan =
+      start_supervised!(
+        {Agent, fn ->
+          %{count: 0, fail_on: MapSet.new([2, 4])}
+        end}
+      )
+
+    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+
+    :sys.replace_state(dispatcher, fn state ->
+      %{state | registry: exception_registry}
+    end)
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_exception_hook_failure")
+    assert_receive {:action_ran, "after_exception_hook_failure"}, 1_000
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "old_route")
+    refute_receive {:action_ran, "old_route"}, 200
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_exception_registry_update")
+    assert_receive {:action_ran, "after_exception_registry_update"}, 1_000
   end
 
   test "refreshes routes while preserving cached hook defaults on invalid hook defaults returns" do
