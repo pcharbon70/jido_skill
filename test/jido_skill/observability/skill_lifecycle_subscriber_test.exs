@@ -52,6 +52,18 @@ defmodule JidoSkill.Observability.TestSkills.ExplicitLifecycleHook do
   end
 end
 
+defmodule JidoSkill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook do
+  def skill_metadata do
+    %{
+      hooks: %{
+        pre: %{
+          enabled: true
+        }
+      }
+    }
+  end
+end
+
 defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   use GenServer
 
@@ -789,6 +801,77 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
           metadata.type == "skill.custom.pre" and metadata.skill_name == "after-read-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "starts without inherited lifecycle subscriptions when initial hook defaults fail and recovers on refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [%{module: JidoSkill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           hook_defaults: %{
+             pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
+             post: %{enabled: true, signal_type: "skill/post"}
+           },
+           hook_defaults_error: {:invalid_return, :hook_defaults_unavailable}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "before-hook-default-recovery"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = LifecycleSubscriberTestRegistry.set_hook_defaults_error(registry, nil)
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.default.custom.pre",
+          "/hooks/skill/default/custom/pre",
+          "after-hook-default-recovery"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.default.custom.pre" and
+            metadata.skill_name == "after-hook-default-recovery"
       after
         80 ->
           false
