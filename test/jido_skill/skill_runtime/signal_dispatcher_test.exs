@@ -853,6 +853,64 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert dispatcher_state.hook_defaults == cached_hook_defaults
   end
 
+  test "refreshes routes while keeping cached hook defaults when hook defaults raises" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(%{
+        id: {:dispatcher_hook_raise_refresh_registry, System.unique_integer([:positive])},
+        start:
+          {SignalDispatcherTestRegistry, :start_link,
+           [[skills: [valid_dispatcher_skill_entry()], hook_defaults: cached_hook_defaults]]},
+        restart: :temporary
+      })
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_raise_hook_failure")
+    assert_receive {:action_ran, "before_raise_hook_failure"}, 1_000
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_hook_defaults_error(
+               registry,
+               {:raise, RuntimeError.exception("hook_defaults_unavailable")}
+             )
+
+    ref = Process.monitor(registry)
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert_receive {:DOWN, ^ref, :process, ^registry, _reason}, 1_000
+    assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_raise_hook_failure")
+    assert_receive {:action_ran, "after_raise_hook_failure"}, 1_000
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "old_route")
+    refute_receive {:action_ran, "old_route"}, 200
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_raise_registry_update")
+    assert_receive {:action_ran, "after_raise_registry_update"}, 1_000
+  end
+
   test "refreshes routes while preserving cached hook defaults on invalid hook defaults returns" do
     set_notify_pid!()
 
