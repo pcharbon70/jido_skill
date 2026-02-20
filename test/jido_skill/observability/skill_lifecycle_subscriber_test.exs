@@ -1355,6 +1355,88 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "preserves lifecycle subscriptions when hook defaults raises during refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(%{
+        id: {:lifecycle_hook_raise_refresh_registry, System.unique_integer([:positive])},
+        start:
+          {LifecycleSubscriberTestRegistry, :start_link,
+           [[skills: [%{module: JidoSkill.Observability.TestSkills.ValidLifecycleHook}]]]},
+        restart: :temporary
+      })
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "before-raise-hook-defaults"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and
+            metadata.skill_name == "before-raise-hook-defaults"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_hook_defaults_error(
+               registry,
+               {:raise, RuntimeError.exception("hook_defaults_unavailable")}
+             )
+
+    ref = Process.monitor(registry)
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    assert_receive {:DOWN, ^ref, :process, ^registry, _reason}, 1_000
+
+    Process.sleep(50)
+    assert Process.alive?(subscriber)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.custom.pre",
+          "/hooks/skill/custom/pre",
+          "after-raise-hook-defaults"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.custom.pre" and
+            metadata.skill_name == "after-raise-hook-defaults"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "refreshes explicit hooks while preserving inherited disable when hook defaults refresh fails" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     start_supervised!({Bus, [name: bus_name, middleware: []]})
