@@ -538,6 +538,46 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_raise_recovery"}, 1_000
   end
 
+  test "starts with empty routes when initial registry reference raises call exceptions and recovers on refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: %{}]})
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_exception_recovery")
+    refute_receive {:action_ran, "before_exception_recovery"}, 200
+
+    recovered_registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    :sys.replace_state(dispatcher, fn state ->
+      %{state | registry: recovered_registry}
+    end)
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_exception_recovery")
+    assert_receive {:action_ran, "after_exception_recovery"}, 1_000
+  end
+
   test "starts when registry is unavailable during init and recovers after registry starts" do
     set_notify_pid!()
 
@@ -805,6 +845,42 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
     assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_raise_refresh")
     assert_receive {:action_ran, "after_raise_refresh"}, 1_000
+  end
+
+  test "preserves existing routes when list_skills call raises call exceptions during refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry, [skills: [valid_dispatcher_skill_entry()]]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_exception_refresh")
+    assert_receive {:action_ran, "before_exception_refresh"}, 1_000
+
+    :sys.replace_state(dispatcher, fn state ->
+      %{state | registry: %{}}
+    end)
+
+    assert {:error, {:list_skills_failed, {:exception, %FunctionClauseError{}}}} =
+             SignalDispatcher.refresh(dispatcher)
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "after_exception_refresh")
+    assert_receive {:action_ran, "after_exception_refresh"}, 1_000
   end
 
   test "refreshes routes while keeping cached hook defaults when hook defaults fail" do
