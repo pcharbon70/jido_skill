@@ -148,7 +148,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       {hook_defaults, hook_defaults_refresh_error} =
         resolve_hook_defaults(state.registry, state.hook_defaults)
 
-      log_hook_defaults_refresh_error(hook_defaults_refresh_error)
+      log_hook_defaults_refresh_error(hook_defaults_refresh_error, mode)
 
       {:ok,
        %{
@@ -513,9 +513,15 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     end
   end
 
-  defp log_hook_defaults_refresh_error(nil), do: :ok
+  defp log_hook_defaults_refresh_error(nil, _mode), do: :ok
 
-  defp log_hook_defaults_refresh_error(reason) do
+  defp log_hook_defaults_refresh_error(reason, :empty) do
+    Logger.warning(
+      "failed to load dispatcher hook defaults during startup; continuing with empty defaults: #{inspect(reason)}"
+    )
+  end
+
+  defp log_hook_defaults_refresh_error(reason, :error) do
     Logger.warning(
       "failed to refresh hook defaults; keeping cached defaults: #{inspect(reason)}"
     )
