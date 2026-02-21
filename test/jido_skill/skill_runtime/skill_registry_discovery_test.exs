@@ -393,6 +393,93 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
              {:ask, ["Bash(git:*)"]}
   end
 
+  test "reload refreshes signal bus from settings and publishes updates on the refreshed bus" do
+    tmp = tmp_dir("reload_signal_bus")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "alpha", "alpha", "1.0.0", "Alpha")
+
+    local_settings_path = Path.join(local_root, "settings.json")
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+    initial_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    write_settings(
+      local_settings_path,
+      "skill/reloaded/pre",
+      "skill/reloaded/post",
+      %{"allow" => [], "deny" => [], "ask" => []},
+      reloaded_bus_name
+    )
+
+    start_supervised!({Jido.Signal.Bus, [name: initial_bus_name, middleware: []]})
+    start_supervised!({Jido.Signal.Bus, [name: reloaded_bus_name, middleware: []]})
+
+    assert {:ok, _sub_id} =
+             Bus.subscribe(reloaded_bus_name, "skill.registry.updated",
+               dispatch: {:pid, target: self(), delivery_mode: :async}
+             )
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: initial_bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: %{
+            pre: %{enabled: true, signal_type: "skill/pre", bus: initial_bus_name, data: %{}},
+            post: %{enabled: true, signal_type: "skill/post", bus: initial_bus_name, data: %{}}
+          }
+        ]
+      })
+
+    assert SkillRegistry.bus_name(registry) == initial_bus_name
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert SkillRegistry.bus_name(registry) == reloaded_bus_name
+    assert_receive {:signal, signal}, 1_000
+    assert signal.type == "skill.registry.updated"
+  end
+
+  test "reload keeps cached signal bus when settings reload fails" do
+    tmp = tmp_dir("reload_signal_bus_invalid")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "alpha", "alpha", "1.0.0", "Alpha")
+
+    local_settings_path = Path.join(local_root, "settings.json")
+    File.mkdir_p!(Path.dirname(local_settings_path))
+    File.write!(local_settings_path, "{invalid")
+
+    initial_bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: initial_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: initial_bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: %{
+            pre: %{enabled: true, signal_type: "skill/pre", bus: initial_bus_name, data: %{}},
+            post: %{enabled: true, signal_type: "skill/post", bus: initial_bus_name, data: %{}}
+          }
+        ]
+      })
+
+    assert SkillRegistry.bus_name(registry) == initial_bus_name
+    assert :ok = SkillRegistry.reload(registry)
+    assert SkillRegistry.bus_name(registry) == initial_bus_name
+  end
+
   defp write_skill(root, dir_name, skill_name, version, description, opts \\ []) do
     skill_path = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_path)
@@ -421,23 +508,27 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
          path,
          pre_signal_type,
          post_signal_type,
-         permissions \\ %{"allow" => [], "deny" => [], "ask" => []}
+         permissions \\ %{"allow" => [], "deny" => [], "ask" => []},
+         signal_bus_name \\ "jido_code_bus"
        ) do
+    signal_bus_name = to_string(signal_bus_name)
+    hook_bus_name = ":#{signal_bus_name}"
+
     settings = %{
       "version" => "2.0.0",
-      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "signal_bus" => %{"name" => signal_bus_name, "middleware" => []},
       "permissions" => permissions,
       "hooks" => %{
         "pre" => %{
           "enabled" => true,
           "signal_type" => pre_signal_type,
-          "bus" => ":jido_code_bus",
+          "bus" => hook_bus_name,
           "data_template" => %{}
         },
         "post" => %{
           "enabled" => true,
           "signal_type" => post_signal_type,
-          "bus" => ":jido_code_bus",
+          "bus" => hook_bus_name,
           "data_template" => %{}
         }
       }
