@@ -80,6 +80,12 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   @spec hook_defaults(GenServer.server()) :: hook_defaults()
   def hook_defaults(server), do: GenServer.call(server, :hook_defaults)
 
+  @spec bus_name() :: atom() | String.t()
+  def bus_name, do: bus_name(__MODULE__)
+
+  @spec bus_name(GenServer.server()) :: atom() | String.t()
+  def bus_name(server), do: GenServer.call(server, :bus_name)
+
   @spec reload() :: :ok
   def reload, do: reload(__MODULE__)
 
@@ -121,14 +127,21 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   end
 
   @impl GenServer
+  def handle_call(:bus_name, _from, state) do
+    {:reply, state.bus_name, state}
+  end
+
+  @impl GenServer
   def handle_call(:reload, _from, state) do
+    previous_bus_name = state.bus_name
+
     new_state =
       state
       |> refresh_settings_from_files()
       |> Map.put(:skills, %{})
       |> load_all_skills()
 
-    publish_registry_update(new_state)
+    publish_registry_update(new_state, previous_bus_name)
     {:reply, :ok, new_state}
   end
 
@@ -164,7 +177,8 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
         %{
           state
           | hook_defaults: settings.hooks,
-            permissions: normalize_permissions(settings.permissions)
+            permissions: normalize_permissions(settings.permissions),
+            bus_name: settings.signal_bus.name
         }
 
       :skip ->
@@ -172,7 +186,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
       {:error, reason} ->
         Logger.warning(
-          "failed to reload runtime settings from settings files; keeping cached hook defaults and permissions: #{inspect(reason)}"
+          "failed to reload runtime settings from settings files; keeping cached hook defaults, permissions, and signal bus: #{inspect(reason)}"
         )
 
         state
@@ -411,18 +425,39 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
     end)
   end
 
-  defp publish_registry_update(state) do
+  defp publish_registry_update(state, previous_bus_name) do
+    bus_names =
+      [state.bus_name, previous_bus_name]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
     payload = %{skills: state.skills |> Map.keys() |> Enum.sort(), count: map_size(state.skills)}
     signal_type = normalize_signal_type("skill/registry/updated")
 
     with {:ok, signal} <-
            Signal.new(signal_type, payload, source: "/skill_registry"),
-         {:ok, _recorded} <- Bus.publish(state.bus_name, [signal]) do
+         :ok <- publish_registry_update_to_buses(bus_names, signal) do
       :ok
     else
       {:error, reason} ->
         Logger.warning("failed to publish skill registry update: #{inspect(reason)}")
         :ok
+    end
+  end
+
+  defp publish_registry_update_to_buses([], _signal), do: :ok
+
+  defp publish_registry_update_to_buses([bus_name | rest], signal) do
+    case Bus.publish(bus_name, [signal]) do
+      {:ok, _recorded} ->
+        publish_registry_update_to_buses(rest, signal)
+
+      {:error, reason} ->
+        Logger.warning(
+          "failed to publish skill registry update on bus #{inspect(bus_name)}: #{inspect(reason)}"
+        )
+
+        publish_registry_update_to_buses(rest, signal)
     end
   end
 
