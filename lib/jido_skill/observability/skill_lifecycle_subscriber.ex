@@ -30,7 +30,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
   @impl GenServer
   def init(opts) do
-    bus_name = Keyword.fetch!(opts, :bus_name)
+    configured_bus_name = Keyword.fetch!(opts, :bus_name)
     registry = Keyword.get(opts, :registry)
     refresh_bus_name = Keyword.get(opts, :refresh_bus_name, false)
     configured_hook_signal_types = hook_signal_types(opts)
@@ -42,6 +42,58 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
     fallback_subscription_paths =
       build_target_subscription_paths(configured_hook_signal_types, [])
 
+    {target_bus_name, startup_bus_error} =
+      resolve_startup_bus_name(refresh_bus_name, registry, configured_bus_name)
+
+    log_startup_bus_error(startup_bus_error)
+
+    case init_state(
+           target_bus_name,
+           registry,
+           refresh_bus_name,
+           configured_hook_signal_types,
+           cached_hook_defaults,
+           subscription_paths,
+           fallback_subscription_paths
+         ) do
+      {:ok, state} ->
+        {:ok, state}
+
+      {:error, reason} when target_bus_name != configured_bus_name ->
+        Logger.warning(
+          "failed to migrate lifecycle signal bus during startup; continuing with configured bus #{inspect(configured_bus_name)}: #{inspect(reason)}"
+        )
+
+        case init_state(
+               configured_bus_name,
+               registry,
+               refresh_bus_name,
+               configured_hook_signal_types,
+               cached_hook_defaults,
+               subscription_paths,
+               fallback_subscription_paths
+             ) do
+          {:ok, state} ->
+            {:ok, state}
+
+          {:error, fallback_reason} ->
+            {:stop, {:subscription_failed, fallback_reason}}
+        end
+
+      {:error, reason} ->
+        {:stop, {:subscription_failed, reason}}
+    end
+  end
+
+  defp init_state(
+         bus_name,
+         registry,
+         refresh_bus_name,
+         configured_hook_signal_types,
+         cached_hook_defaults,
+         subscription_paths,
+         fallback_subscription_paths
+       ) do
     with {:ok, subscriptions} <-
            init_subscriptions(bus_name, subscription_paths, fallback_subscription_paths),
          {:ok, registry_subscription} <- subscribe_registry_updates(bus_name, registry) do
@@ -55,9 +107,6 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
          subscriptions: subscriptions,
          registry_subscription: registry_subscription
        }}
-    else
-      {:error, reason} ->
-        {:stop, {:subscription_failed, reason}}
     end
   end
 
@@ -269,6 +318,12 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
        do: resolve_bus_name(registry, state.bus_name)
 
   defp resolve_target_bus_name(state), do: {state.bus_name, nil}
+
+  defp resolve_startup_bus_name(true, registry, current_bus_name) when not is_nil(registry),
+    do: resolve_bus_name(registry, current_bus_name)
+
+  defp resolve_startup_bus_name(_refresh_bus_name, _registry, current_bus_name),
+    do: {current_bus_name, nil}
 
   defp sync_subscriptions(state, target_bus_name, target_paths) do
     if target_bus_name == state.bus_name do
@@ -529,6 +584,14 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   defp log_bus_refresh_error(reason) do
     Logger.warning(
       "failed to refresh lifecycle signal bus; keeping cached bus: #{inspect(reason)}"
+    )
+  end
+
+  defp log_startup_bus_error(nil), do: :ok
+
+  defp log_startup_bus_error(reason) do
+    Logger.warning(
+      "failed to load lifecycle signal bus during startup; continuing with configured bus: #{inspect(reason)}"
     )
   end
 
