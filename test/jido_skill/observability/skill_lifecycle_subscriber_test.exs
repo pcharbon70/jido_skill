@@ -143,6 +143,32 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   end
 end
 
+defmodule JidoSkill.Observability.LifecycleSubscriberNthLookupVia do
+  def whereis_name({registry, lookup_plan}) do
+    {lookup_index, fail_lookup?} =
+      Agent.get_and_update(lookup_plan, fn %{count: count, fail_on: fail_on} = state ->
+        next = count + 1
+        {{next, MapSet.member?(fail_on, next)}, %{state | count: next}}
+      end)
+
+    if fail_lookup? do
+      raise ArgumentError, "simulated lifecycle registry lookup failure at call #{lookup_index}"
+    end
+
+    registry
+  end
+
+  def register_name(_name, _pid), do: :yes
+  def unregister_name(_name), do: :ok
+
+  def send({registry, _lookup_plan}, message) when is_pid(registry) do
+    Kernel.send(registry, message)
+    registry
+  end
+
+  def send(_name, _message), do: :badarg
+end
+
 defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
   use ExUnit.Case, async: false
 
@@ -1597,6 +1623,147 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
           metadata.type == "skill.custom.pre" and
             metadata.skill_name == "after-raise-hook-defaults"
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "refreshes lifecycle subscriptions while keeping cached hook defaults when hook defaults call raises exceptions" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    cached_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
+      post: %{enabled: true, signal_type: "skill/post"}
+    }
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [%{module: JidoSkill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.default.custom.pre",
+          "/hooks/skill/default/custom/pre",
+          "before-call-exception-hook-defaults-refresh"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.default.custom.pre" and
+            metadata.skill_name == "before-call-exception-hook-defaults-refresh"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_skills(registry, [
+               %{module: JidoSkill.Observability.TestSkills.ExplicitLifecycleHook}
+             ])
+
+    lookup_plan =
+      start_supervised!(
+        {Agent, fn ->
+          %{count: 0, fail_on: MapSet.new([1, 3])}
+        end}
+      )
+
+    exception_registry =
+      {:via, JidoSkill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+
+    :sys.replace_state(subscriber, fn state ->
+      %{state | registry: exception_registry}
+    end)
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    assert Process.alive?(subscriber)
+
+    updated_state = :sys.get_state(subscriber)
+    assert updated_state.cached_hook_defaults == cached_hook_defaults
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.explicit.pre",
+          "/hooks/skill/explicit/pre",
+          "after-call-exception-hook-defaults-refresh"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.explicit.pre" and
+            metadata.skill_name == "after-call-exception-hook-defaults-refresh"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "old-hook-after-call-exception-hook-defaults-refresh"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    assert Process.alive?(subscriber)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.explicit.pre",
+          "/hooks/skill/explicit/pre",
+          "after-call-exception-hook-defaults-registry-update"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.explicit.pre" and
+            metadata.skill_name == "after-call-exception-hook-defaults-registry-update"
       after
         80 ->
           false
