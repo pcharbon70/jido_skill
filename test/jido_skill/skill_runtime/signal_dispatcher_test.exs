@@ -557,6 +557,166 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     )
   end
 
+  test "updates inherited hook signal types after registry reload refreshes settings hook defaults" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_hook_defaults_reload")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    create_skill(
+      local_root,
+      "dispatcher-hook-defaults-reload",
+      "demo/hook_defaults_reload",
+      bus_name,
+      include_hooks: false
+    )
+
+    write_settings(local_settings_path, default_permissions(),
+      pre_signal_type: "skill/pre/reloaded",
+      post_signal_type: "skill/post/reloaded",
+      pre_bus: bus_name,
+      post_bus: bus_name
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: hook_defaults(bus_name),
+           permissions: default_permissions()
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_defaults_reload"]
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+    subscribe!(bus_name, "skill.pre.reloaded")
+    subscribe!(bus_name, "skill.post.reloaded")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_defaults_reload", "before_reload")
+    assert_receive {:action_ran, "before_reload"}, 1_000
+    assert_receive {:signal, pre_before_reload}, 1_000
+    assert pre_before_reload.type == "skill.pre"
+    assert pre_before_reload.data["route"] == "demo/hook_defaults_reload"
+    assert_receive {:signal, post_before_reload}, 1_000
+    assert post_before_reload.type == "skill.post"
+    assert post_before_reload.data["route"] == "demo/hook_defaults_reload"
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      hook_defaults = :sys.get_state(dispatcher).hook_defaults
+
+      get_in(hook_defaults, [:pre, :signal_type]) == "skill/pre/reloaded" and
+        get_in(hook_defaults, [:post, :signal_type]) == "skill/post/reloaded"
+    end)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_defaults_reload", "after_reload")
+    assert_receive {:action_ran, "after_reload"}, 1_000
+    assert_receive {:signal, pre_after_reload}, 1_000
+    assert pre_after_reload.type == "skill.pre.reloaded"
+    assert pre_after_reload.data["route"] == "demo/hook_defaults_reload"
+    assert_receive {:signal, post_after_reload}, 1_000
+    assert post_after_reload.type == "skill.post.reloaded"
+    assert post_after_reload.data["route"] == "demo/hook_defaults_reload"
+  end
+
+  test "preserves cached inherited hook signal types when registry settings reload fails" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_hook_defaults_reload_invalid")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    create_skill(
+      local_root,
+      "dispatcher-hook-defaults-invalid-settings",
+      "demo/hook_defaults_invalid",
+      bus_name,
+      include_hooks: false
+    )
+
+    write_settings(local_settings_path, default_permissions(),
+      pre_signal_type: "skill/pre/reloaded",
+      post_signal_type: "skill/post/reloaded",
+      pre_bus: bus_name,
+      post_bus: bus_name
+    )
+
+    cached_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/pre/cached", bus: bus_name, data: %{}},
+      post: %{enabled: true, signal_type: "skill/post/cached", bus: bus_name, data: %{}}
+    }
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: cached_hook_defaults,
+           permissions: default_permissions()
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_defaults_invalid"]
+
+    subscribe!(bus_name, "skill.pre.cached")
+    subscribe!(bus_name, "skill.post.cached")
+    subscribe!(bus_name, "skill.pre.reloaded")
+    subscribe!(bus_name, "skill.post.reloaded")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_defaults_invalid", "before_reload")
+    assert_receive {:action_ran, "before_reload"}, 1_000
+    assert_receive {:signal, pre_before_reload}, 1_000
+    assert pre_before_reload.type == "skill.pre.cached"
+    assert pre_before_reload.data["route"] == "demo/hook_defaults_invalid"
+    assert_receive {:signal, post_before_reload}, 1_000
+    assert post_before_reload.type == "skill.post.cached"
+    assert post_before_reload.data["route"] == "demo/hook_defaults_invalid"
+
+    File.write!(local_settings_path, "{invalid")
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      hook_defaults = :sys.get_state(dispatcher).hook_defaults
+      hook_defaults == cached_hook_defaults
+    end)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_defaults_invalid", "after_reload")
+    assert_receive {:action_ran, "after_reload"}, 1_000
+    assert_receive {:signal, pre_after_reload}, 1_000
+    assert pre_after_reload.type == "skill.pre.cached"
+    assert pre_after_reload.data["route"] == "demo/hook_defaults_invalid"
+    assert_receive {:signal, post_after_reload}, 1_000
+    assert post_after_reload.type == "skill.post.cached"
+    assert post_after_reload.data["route"] == "demo/hook_defaults_invalid"
+  end
+
   test "preserves existing route subscriptions when refresh fails adding new routes" do
     set_notify_pid!()
 
@@ -1734,22 +1894,29 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{"allow" => [], "deny" => [], "ask" => []}
   end
 
-  defp write_settings(path, permissions) do
+  defp write_settings(path, permissions, opts \\ []) do
+    pre_signal_type = Keyword.get(opts, :pre_signal_type, "skill/pre")
+    post_signal_type = Keyword.get(opts, :post_signal_type, "skill/post")
+    pre_enabled = Keyword.get(opts, :pre_enabled, true)
+    post_enabled = Keyword.get(opts, :post_enabled, true)
+    pre_bus = Keyword.get(opts, :pre_bus, ":jido_code_bus")
+    post_bus = Keyword.get(opts, :post_bus, ":jido_code_bus")
+
     settings = %{
       "version" => "2.0.0",
       "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
       "permissions" => permissions,
       "hooks" => %{
         "pre" => %{
-          "enabled" => true,
-          "signal_type" => "skill/pre",
-          "bus" => ":jido_code_bus",
+          "enabled" => pre_enabled,
+          "signal_type" => pre_signal_type,
+          "bus" => pre_bus,
           "data_template" => %{}
         },
         "post" => %{
-          "enabled" => true,
-          "signal_type" => "skill/post",
-          "bus" => ":jido_code_bus",
+          "enabled" => post_enabled,
+          "signal_type" => post_signal_type,
+          "bus" => post_bus,
           "data_template" => %{}
         }
       }
