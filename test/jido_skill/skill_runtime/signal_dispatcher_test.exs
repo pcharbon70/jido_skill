@@ -408,6 +408,155 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_permission_blocked_signal("dispatcher-denied", "demo/denied", "denied", ["Bash(rm:*)"])
   end
 
+  test "updates permission decisions after registry reload refreshes settings permissions" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_permission_reload")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    create_skill(
+      local_root,
+      "dispatcher-ask-reload",
+      "demo/ask_reload",
+      bus_name,
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []})
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: hook_defaults(bus_name),
+           permissions: default_permissions()
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.ask_reload"]
+    subscribe!(bus_name, "skill.permission.blocked")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.ask_reload", "before_reload")
+    assert_receive {:action_ran, "before_reload"}, 1_000
+    refute_receive {:signal, _blocked_before_reload}, 200
+
+    write_settings(local_settings_path, %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => ["Bash(git:*)"]
+    })
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      case :sys.get_state(dispatcher).route_handlers do
+        %{"demo.ask_reload" => [handler | _]} ->
+          handler.permission_status == {:ask, ["Bash(git:*)"]}
+
+        _ ->
+          false
+      end
+    end)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.ask_reload", "after_reload")
+    refute_receive {:action_ran, "after_reload"}, 300
+
+    assert_permission_blocked_signal(
+      "dispatcher-ask-reload",
+      "demo/ask_reload",
+      "ask",
+      ["Bash(git:*)"]
+    )
+  end
+
+  test "preserves permission decisions when registry settings reload fails" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("dispatcher_permission_reload_invalid")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    create_skill(
+      local_root,
+      "dispatcher-ask-invalid-settings",
+      "demo/ask_invalid",
+      bus_name,
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []})
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: hook_defaults(bus_name),
+           permissions: %{"allow" => [], "deny" => [], "ask" => ["Bash(git:*)"]}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.ask_invalid"]
+    subscribe!(bus_name, "skill.permission.blocked")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.ask_invalid", "before_reload")
+    refute_receive {:action_ran, "before_reload"}, 300
+
+    assert_permission_blocked_signal(
+      "dispatcher-ask-invalid-settings",
+      "demo/ask_invalid",
+      "ask",
+      ["Bash(git:*)"]
+    )
+
+    File.write!(local_settings_path, "{invalid")
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      case :sys.get_state(dispatcher).route_handlers do
+        %{"demo.ask_invalid" => [handler | _]} ->
+          handler.permission_status == {:ask, ["Bash(git:*)"]}
+
+        _ ->
+          false
+      end
+    end)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.ask_invalid", "after_reload")
+    refute_receive {:action_ran, "after_reload"}, 300
+
+    assert_permission_blocked_signal(
+      "dispatcher-ask-invalid-settings",
+      "demo/ask_invalid",
+      "ask",
+      ["Bash(git:*)"]
+    )
+  end
+
   test "preserves existing route subscriptions when refresh fails adding new routes" do
     set_notify_pid!()
 
@@ -1583,6 +1732,31 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
 
   defp default_permissions do
     %{"allow" => [], "deny" => [], "ask" => []}
+  end
+
+  defp write_settings(path, permissions) do
+    settings = %{
+      "version" => "2.0.0",
+      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "permissions" => permissions,
+      "hooks" => %{
+        "pre" => %{
+          "enabled" => true,
+          "signal_type" => "skill/pre",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        },
+        "post" => %{
+          "enabled" => true,
+          "signal_type" => "skill/post",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        }
+      }
+    }
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, Jason.encode!(settings))
   end
 
   defp tmp_dir(prefix) do
