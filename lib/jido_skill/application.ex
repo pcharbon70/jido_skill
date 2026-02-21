@@ -30,6 +30,7 @@ defmodule JidoSkill.Application do
           {JidoSkill.Observability.SkillLifecycleSubscriber,
            [
              bus_name: bus_name,
+             refresh_bus_name: true,
              hook_signal_types: hook_signal_types,
              fallback_to_default_hook_signal_types: false,
              registry: JidoSkill.SkillRuntime.SkillRegistry
