@@ -124,9 +124,9 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
   def handle_call(:reload, _from, state) do
     new_state =
       state
+      |> refresh_settings_from_files()
       |> Map.put(:skills, %{})
       |> load_all_skills()
-      |> refresh_hook_defaults_from_settings()
 
     publish_registry_update(new_state)
     {:reply, :ok, new_state}
@@ -158,33 +158,34 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
     %{state | skills: merged_skills}
   end
 
-  defp refresh_hook_defaults_from_settings(state) do
-    case load_hook_defaults_from_settings(state) do
-      {:ok, hook_defaults} ->
-        %{state | hook_defaults: hook_defaults}
+  defp refresh_settings_from_files(state) do
+    case load_settings_from_files(state) do
+      {:ok, settings} ->
+        %{
+          state
+          | hook_defaults: settings.hooks,
+            permissions: normalize_permissions(settings.permissions)
+        }
 
       :skip ->
         state
 
       {:error, reason} ->
         Logger.warning(
-          "failed to reload hook defaults from settings; keeping cached defaults: #{inspect(reason)}"
+          "failed to reload runtime settings from settings files; keeping cached hook defaults and permissions: #{inspect(reason)}"
         )
 
         state
     end
   end
 
-  defp load_hook_defaults_from_settings(state) do
+  defp load_settings_from_files(state) do
     case settings_load_opts(state) do
       :skip ->
         :skip
 
       load_opts ->
-        case Settings.load(load_opts) do
-          {:ok, settings} -> {:ok, settings.hooks}
-          {:error, reason} -> {:error, reason}
-        end
+        Settings.load(load_opts)
     end
   end
 

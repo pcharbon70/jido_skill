@@ -296,6 +296,103 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     assert SkillRegistry.hook_defaults(registry) == initial_hook_defaults
   end
 
+  test "reload refreshes permissions from settings and reclassifies skill entries" do
+    tmp = tmp_dir("reload_permissions")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "ask_skill", "ask-skill", "1.0.0", "Ask",
+      allowed_tools: "Bash(git:*)"
+    )
+
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    write_settings(local_settings_path, "skill/reloaded/pre", "skill/reloaded/post", %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => ["Bash(git:*)"]
+    })
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: %{
+            pre: %{enabled: true, signal_type: "skill/pre", bus: bus_name, data: %{}},
+            post: %{enabled: true, signal_type: "skill/post", bus: bus_name, data: %{}}
+          },
+          permissions: %{
+            "allow" => [],
+            "deny" => [],
+            "ask" => []
+          }
+        ]
+      })
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status == :allowed
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status ==
+             {:ask, ["Bash(git:*)"]}
+  end
+
+  test "reload keeps cached permissions when settings reload fails" do
+    tmp = tmp_dir("reload_permissions_invalid")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "ask_skill", "ask-skill", "1.0.0", "Ask",
+      allowed_tools: "Bash(git:*)"
+    )
+
+    local_settings_path = Path.join(local_root, "settings.json")
+    File.mkdir_p!(Path.dirname(local_settings_path))
+    File.write!(local_settings_path, "{invalid")
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    cached_permissions = %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => ["Bash(git:*)"]
+    }
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: %{
+            pre: %{enabled: true, signal_type: "skill/pre", bus: bus_name, data: %{}},
+            post: %{enabled: true, signal_type: "skill/post", bus: bus_name, data: %{}}
+          },
+          permissions: cached_permissions
+        ]
+      })
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status ==
+             {:ask, ["Bash(git:*)"]}
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert SkillRegistry.get_skill(registry, "ask-skill").permission_status ==
+             {:ask, ["Bash(git:*)"]}
+  end
+
   defp write_skill(root, dir_name, skill_name, version, description, opts \\ []) do
     skill_path = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_path)
@@ -320,11 +417,16 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     File.write!(Path.join(skill_path, "SKILL.md"), content)
   end
 
-  defp write_settings(path, pre_signal_type, post_signal_type) do
+  defp write_settings(
+         path,
+         pre_signal_type,
+         post_signal_type,
+         permissions \\ %{"allow" => [], "deny" => [], "ask" => []}
+       ) do
     settings = %{
       "version" => "2.0.0",
       "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
-      "permissions" => %{"allow" => [], "deny" => [], "ask" => []},
+      "permissions" => permissions,
       "hooks" => %{
         "pre" => %{
           "enabled" => true,
