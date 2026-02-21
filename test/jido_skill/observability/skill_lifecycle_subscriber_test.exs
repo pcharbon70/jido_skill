@@ -473,6 +473,260 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     )
   end
 
+  test "updates inherited lifecycle subscriptions after registry reload refreshes settings hook defaults" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("lifecycle_hook_defaults_reload")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    write_skill(
+      local_root,
+      "lifecycle-inherited-reload",
+      "lifecycle-inherited-reload",
+      "demo/lifecycle_inherited_reload",
+      pre_enabled: true
+    )
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []},
+      pre_enabled: true,
+      pre_signal_type: "skill/inherited/reloaded"
+    )
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: %{
+             pre: %{enabled: true, signal_type: "skill/inherited/cached"},
+             post: %{enabled: false, signal_type: "skill/post"}
+           },
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.inherited.cached",
+          "/hooks/skill/inherited/cached",
+          "before-reload"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.inherited.cached" and metadata.skill_name == "before-reload"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.inherited.reloaded",
+            "/hooks/skill/inherited/reloaded",
+            "before-reload-reloaded"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      get_in(state.cached_hook_defaults, [:pre, :signal_type]) == "skill/inherited/reloaded" and
+        Map.has_key?(state.subscriptions, "skill.inherited.reloaded") and
+        not Map.has_key?(state.subscriptions, "skill.inherited.cached")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.inherited.reloaded",
+          "/hooks/skill/inherited/reloaded",
+          "after-reload"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.inherited.reloaded" and metadata.skill_name == "after-reload"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.inherited.cached",
+            "/hooks/skill/inherited/cached",
+            "after-reload-cached"
+          )
+      end,
+      6,
+      60
+    )
+  end
+
+  test "preserves inherited lifecycle subscriptions when registry settings reload fails" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("lifecycle_hook_defaults_reload_invalid")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    write_skill(
+      local_root,
+      "lifecycle-inherited-reload-invalid",
+      "lifecycle-inherited-reload-invalid",
+      "demo/lifecycle_inherited_reload_invalid",
+      pre_enabled: true
+    )
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []},
+      pre_enabled: true,
+      pre_signal_type: "skill/inherited/reloaded"
+    )
+
+    cached_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/inherited/cached"},
+      post: %{enabled: false, signal_type: "skill/post"}
+    }
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: cached_hook_defaults,
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.inherited.cached",
+          "/hooks/skill/inherited/cached",
+          "before-reload"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.inherited.cached" and metadata.skill_name == "before-reload"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    File.write!(local_settings_path, "{invalid")
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+      state.cached_hook_defaults == cached_hook_defaults
+    end)
+
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.inherited.cached",
+          "/hooks/skill/inherited/cached",
+          "after-reload"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.inherited.cached" and metadata.skill_name == "after-reload"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.inherited.reloaded",
+            "/hooks/skill/inherited/reloaded",
+            "after-reload-reloaded"
+          )
+      end,
+      6,
+      60
+    )
+  end
+
   test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
     timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -2687,22 +2941,29 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     File.write!(Path.join(skill_dir, "SKILL.md"), content)
   end
 
-  defp write_settings(path, permissions) do
+  defp write_settings(path, permissions, opts \\ []) do
+    pre_enabled = Keyword.get(opts, :pre_enabled, false)
+    post_enabled = Keyword.get(opts, :post_enabled, false)
+    pre_signal_type = Keyword.get(opts, :pre_signal_type, "skill/pre")
+    post_signal_type = Keyword.get(opts, :post_signal_type, "skill/post")
+    pre_bus = Keyword.get(opts, :pre_bus, ":jido_code_bus")
+    post_bus = Keyword.get(opts, :post_bus, ":jido_code_bus")
+
     settings = %{
       "version" => "2.0.0",
       "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
       "permissions" => permissions,
       "hooks" => %{
         "pre" => %{
-          "enabled" => false,
-          "signal_type" => "skill/pre",
-          "bus" => ":jido_code_bus",
+          "enabled" => pre_enabled,
+          "signal_type" => pre_signal_type,
+          "bus" => pre_bus,
           "data_template" => %{}
         },
         "post" => %{
-          "enabled" => false,
-          "signal_type" => "skill/post",
-          "bus" => ":jido_code_bus",
+          "enabled" => post_enabled,
+          "signal_type" => post_signal_type,
+          "bus" => post_bus,
           "data_template" => %{}
         }
       }
