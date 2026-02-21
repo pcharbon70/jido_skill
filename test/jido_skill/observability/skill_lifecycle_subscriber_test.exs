@@ -72,7 +72,8 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
       skills: Keyword.get(opts, :skills, []),
       hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
       hook_defaults_error: Keyword.get(opts, :hook_defaults_error),
-      list_skills_error: Keyword.get(opts, :list_skills_error)
+      list_skills_error: Keyword.get(opts, :list_skills_error),
+      bus_name: Keyword.get(opts, :bus_name)
     }
 
     name = Keyword.get(opts, :name)
@@ -92,6 +93,11 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
 
   @impl GenServer
   def init(state), do: {:ok, state}
+
+  @impl GenServer
+  def handle_call(:bus_name, _from, state) do
+    {:reply, state.bus_name, state}
+  end
 
   @impl GenServer
   def handle_call(:list_skills, _from, state) do
@@ -725,6 +731,221 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       6,
       60
     )
+  end
+
+  test "migrates lifecycle subscriptions to refreshed signal bus after registry settings reload" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("lifecycle_signal_bus_reload")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []},
+      signal_bus_name: reloaded_bus_name
+    )
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: %{
+             pre: %{enabled: true, signal_type: "skill/pre"},
+             post: %{enabled: false, signal_type: "skill/post"}
+           },
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: registry,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "before-reload" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == reloaded_bus_name and
+        state.registry_subscription != initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            old_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-reload-old-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          reloaded_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-reload-new-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "after-reload-new-bus" and
+            metadata.bus == reloaded_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "preserves cached lifecycle bus subscriptions when migration to refreshed bus fails" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("lifecycle_signal_bus_reload_invalid")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+
+    write_settings(local_settings_path, %{"allow" => [], "deny" => [], "ask" => []},
+      signal_bus_name: reloaded_bus_name
+    )
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: %{
+             pre: %{enabled: true, signal_type: "skill/pre"},
+             post: %{enabled: false, signal_type: "skill/post"}
+           },
+           permissions: %{"allow" => [], "deny" => [], "ask" => []}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: registry,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "before-reload" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == old_bus_name and
+        state.registry_subscription == initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-reload-old-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "after-reload-old-bus" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :error =
+             publish_lifecycle_signal(
+               reloaded_bus_name,
+               "skill.pre",
+               "/hooks/skill/pre",
+               "after-reload-new-bus"
+             )
   end
 
   test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
@@ -2946,12 +3167,13 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     post_enabled = Keyword.get(opts, :post_enabled, false)
     pre_signal_type = Keyword.get(opts, :pre_signal_type, "skill/pre")
     post_signal_type = Keyword.get(opts, :post_signal_type, "skill/post")
+    signal_bus_name = Keyword.get(opts, :signal_bus_name, "jido_code_bus") |> to_string()
     pre_bus = Keyword.get(opts, :pre_bus, ":jido_code_bus")
     post_bus = Keyword.get(opts, :post_bus, ":jido_code_bus")
 
     settings = %{
       "version" => "2.0.0",
-      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "signal_bus" => %{"name" => signal_bus_name, "middleware" => []},
       "permissions" => permissions,
       "hooks" => %{
         "pre" => %{

@@ -32,6 +32,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
   def init(opts) do
     bus_name = Keyword.fetch!(opts, :bus_name)
     registry = Keyword.get(opts, :registry)
+    refresh_bus_name = Keyword.get(opts, :refresh_bus_name, false)
     configured_hook_signal_types = hook_signal_types(opts)
     cached_hook_defaults = init_hook_defaults(registry)
 
@@ -48,6 +49,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
        %{
          bus_name: bus_name,
          registry: registry,
+         refresh_bus_name: refresh_bus_name,
          configured_hook_signal_types: configured_hook_signal_types,
          cached_hook_defaults: cached_hook_defaults,
          subscriptions: subscriptions,
@@ -253,28 +255,101 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
              state.registry,
              hook_defaults
            ) do
-      current_paths = Map.keys(state.subscriptions) |> MapSet.new()
-      target_path_set = MapSet.new(target_paths)
+      {target_bus_name, bus_refresh_error} = resolve_target_bus_name(state)
+      log_bus_refresh_error(bus_refresh_error)
 
-      paths_to_remove = MapSet.difference(current_paths, target_path_set) |> MapSet.to_list()
-      paths_to_add = MapSet.difference(target_path_set, current_paths) |> MapSet.to_list()
-
-      case subscribe_paths(state.bus_name, state.subscriptions, paths_to_add) do
-        {:ok, after_subscribe} ->
-          after_sync = unsubscribe_paths(state.bus_name, after_subscribe, paths_to_remove)
-          {:ok, %{state | subscriptions: after_sync, cached_hook_defaults: cached_hook_defaults}}
-
-        {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
-          _rolled_back =
-            rollback_subscriptions(
-              state.bus_name,
-              subscriptions_after_failure,
-              paths_added_before_failure
-            )
-
-          {:error, reason}
+      with {:ok, refreshed_state} <- sync_subscriptions(state, target_bus_name, target_paths) do
+        {:ok, %{refreshed_state | cached_hook_defaults: cached_hook_defaults}}
       end
     end
+  end
+
+  defp resolve_target_bus_name(%{refresh_bus_name: true, registry: registry} = state)
+       when not is_nil(registry),
+       do: resolve_bus_name(registry, state.bus_name)
+
+  defp resolve_target_bus_name(state), do: {state.bus_name, nil}
+
+  defp sync_subscriptions(state, target_bus_name, target_paths) do
+    if target_bus_name == state.bus_name do
+      sync_subscriptions_on_bus(state, state.bus_name, target_paths)
+    else
+      migrate_subscriptions(state, target_bus_name, target_paths)
+    end
+  end
+
+  defp sync_subscriptions_on_bus(state, bus_name, target_paths) do
+    current_paths = Map.keys(state.subscriptions) |> MapSet.new()
+    target_path_set = MapSet.new(target_paths)
+
+    paths_to_remove = MapSet.difference(current_paths, target_path_set) |> MapSet.to_list()
+    paths_to_add = MapSet.difference(target_path_set, current_paths) |> MapSet.to_list()
+
+    case subscribe_paths(bus_name, state.subscriptions, paths_to_add) do
+      {:ok, after_subscribe} ->
+        after_sync = unsubscribe_paths(bus_name, after_subscribe, paths_to_remove)
+        {:ok, %{state | subscriptions: after_sync}}
+
+      {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+        _rolled_back =
+          rollback_subscriptions(
+            bus_name,
+            subscriptions_after_failure,
+            paths_added_before_failure
+          )
+
+        {:error, reason}
+    end
+  end
+
+  defp migrate_subscriptions(state, target_bus_name, target_paths) do
+    case subscribe_registry_updates(target_bus_name, state.registry) do
+      {:ok, target_registry_subscription} ->
+        case subscribe_paths(target_bus_name, %{}, target_paths) do
+          {:ok, target_subscriptions} ->
+            retire_subscriptions(state)
+
+            {:ok,
+             %{
+               state
+               | bus_name: target_bus_name,
+                 registry_subscription: target_registry_subscription,
+                 subscriptions: target_subscriptions
+             }}
+
+          {:error, reason, subscriptions_after_failure, paths_added_before_failure} ->
+            _rolled_back =
+              rollback_subscriptions(
+                target_bus_name,
+                subscriptions_after_failure,
+                paths_added_before_failure
+              )
+
+            maybe_unsubscribe(
+              target_bus_name,
+              normalize_path(@registry_update_signal_type),
+              target_registry_subscription
+            )
+
+            {:error, {:bus_migration_failed, {:subscriptions, target_bus_name, reason}}}
+        end
+
+      {:error, reason} ->
+        {:error, {:bus_migration_failed, {:registry_subscription, target_bus_name, reason}}}
+    end
+  end
+
+  defp retire_subscriptions(state) do
+    _remaining_subscriptions =
+      unsubscribe_paths(state.bus_name, state.subscriptions, Map.keys(state.subscriptions))
+
+    maybe_unsubscribe(
+      state.bus_name,
+      normalize_path(@registry_update_signal_type),
+      state.registry_subscription
+    )
+
+    :ok
   end
 
   defp unsubscribe_paths(bus_name, subscriptions, paths) do
@@ -291,6 +366,8 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
         updated
     end
   end
+
+  defp maybe_unsubscribe(_bus_name, _path, nil), do: :ok
 
   defp maybe_unsubscribe(bus_name, path, subscription_id) do
     case Bus.unsubscribe(bus_name, subscription_id) do
@@ -410,6 +487,49 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
 
     kind, reason ->
       {:error, {:hook_defaults_failed, {kind, reason}}}
+  end
+
+  defp safe_bus_name(registry) do
+    case GenServer.call(registry, :bus_name) do
+      nil ->
+        {:ok, nil}
+
+      bus_name when is_atom(bus_name) or is_binary(bus_name) ->
+        {:ok, bus_name}
+
+      other ->
+        {:error, {:bus_name_failed, {:invalid_result, other}}}
+    end
+  rescue
+    error ->
+      {:error, {:bus_name_failed, {:exception, error}}}
+  catch
+    :exit, reason ->
+      {:error, {:bus_name_failed, {:exit, reason}}}
+
+    kind, reason ->
+      {:error, {:bus_name_failed, {kind, reason}}}
+  end
+
+  defp resolve_bus_name(registry, current_bus_name) do
+    case safe_bus_name(registry) do
+      {:ok, nil} ->
+        {current_bus_name, nil}
+
+      {:ok, bus_name} ->
+        {bus_name, nil}
+
+      {:error, reason} ->
+        {current_bus_name, reason}
+    end
+  end
+
+  defp log_bus_refresh_error(nil), do: :ok
+
+  defp log_bus_refresh_error(reason) do
+    Logger.warning(
+      "failed to refresh lifecycle signal bus; keeping cached bus: #{inspect(reason)}"
+    )
   end
 
   defp handle_registry_read_error(reason),
