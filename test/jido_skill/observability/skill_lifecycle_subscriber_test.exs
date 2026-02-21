@@ -176,6 +176,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
   alias Jido.Signal.Bus
   alias JidoSkill.Observability.LifecycleSubscriberTestRegistry
   alias JidoSkill.Observability.SkillLifecycleSubscriber
+  alias JidoSkill.SkillRuntime.SignalDispatcher
   alias JidoSkill.SkillRuntime.SkillRegistry
 
   @telemetry_event [:jido_skill, :skill, :lifecycle]
@@ -267,6 +268,209 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     assert metadata.status == nil
     assert metadata.reason == "ask"
     assert metadata.tools == ["Bash(git:*)"]
+  end
+
+  test "permission-blocked telemetry stops after settings reload allows tools" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("permission_reload_allow")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+    route = "demo/permission_telemetry"
+    route_type = "demo.permission_telemetry"
+
+    write_skill(
+      local_root,
+      "permission-telemetry-skill",
+      "permission-telemetry-skill",
+      route,
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_settings(local_settings_path, %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => []
+    })
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: %{
+             pre: %{enabled: false},
+             post: %{enabled: false}
+           },
+           permissions: %{
+             "allow" => [],
+             "deny" => [],
+             "ask" => ["Bash(git:*)"]
+           }
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(dispatcher)
+    assert Process.alive?(subscriber)
+    assert SignalDispatcher.routes(dispatcher) == [route_type]
+    attach_handler!()
+
+    assert :ok = publish_dispatch_signal(bus_name, route_type, "before-reload")
+
+    assert_permission_blocked_telemetry(
+      "permission-telemetry-skill",
+      route,
+      "ask",
+      ["Bash(git:*)"]
+    )
+
+    write_settings(local_settings_path, %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => []
+    })
+
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      case :sys.get_state(dispatcher).route_handlers do
+        %{^route_type => [handler | _]} ->
+          handler.permission_status == :allowed
+
+        _ ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        assert :ok = publish_dispatch_signal(bus_name, route_type, "after-reload")
+      end,
+      6,
+      80
+    )
+  end
+
+  test "permission-blocked telemetry remains when settings reload fails" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    root = tmp_dir("permission_reload_invalid")
+    global_root = Path.join(root, "global")
+    local_root = Path.join(root, "local")
+    local_settings_path = Path.join(local_root, "settings.json")
+    route = "demo/permission_telemetry_invalid"
+    route_type = "demo.permission_telemetry_invalid"
+
+    write_skill(
+      local_root,
+      "permission-telemetry-invalid-skill",
+      "permission-telemetry-invalid-skill",
+      route,
+      allowed_tools: "Bash(git:*)"
+    )
+
+    write_settings(local_settings_path, %{
+      "allow" => [],
+      "deny" => [],
+      "ask" => ["Bash(git:*)"]
+    })
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SkillRegistry,
+         [
+           name: nil,
+           bus_name: bus_name,
+           global_path: global_root,
+           local_path: local_root,
+           settings_path: local_settings_path,
+           hook_defaults: %{
+             pre: %{enabled: false},
+             post: %{enabled: false}
+           },
+           permissions: %{
+             "allow" => [],
+             "deny" => [],
+             "ask" => ["Bash(git:*)"]
+           }
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(dispatcher)
+    assert Process.alive?(subscriber)
+    assert SignalDispatcher.routes(dispatcher) == [route_type]
+    attach_handler!()
+
+    assert :ok = publish_dispatch_signal(bus_name, route_type, "before-reload")
+
+    assert_permission_blocked_telemetry(
+      "permission-telemetry-invalid-skill",
+      route,
+      "ask",
+      ["Bash(git:*)"]
+    )
+
+    File.write!(local_settings_path, "{invalid")
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert_eventually(fn ->
+      case :sys.get_state(dispatcher).route_handlers do
+        %{^route_type => [handler | _]} ->
+          handler.permission_status == {:ask, ["Bash(git:*)"]}
+
+        _ ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = publish_dispatch_signal(bus_name, route_type, "after-reload")
+
+    assert_permission_blocked_telemetry(
+      "permission-telemetry-invalid-skill",
+      route,
+      "ask",
+      ["Bash(git:*)"]
+    )
   end
 
   test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
@@ -2402,6 +2606,16 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end
   end
 
+  defp publish_dispatch_signal(bus_name, type, value) do
+    with {:ok, signal} <- Signal.new(type, %{"value" => value}, source: "/test/dispatch"),
+         {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
+      :ok
+    else
+      _ ->
+        :error
+    end
+  end
+
   defp publish_registry_update_signal(bus_name) do
     with {:ok, signal} <- Signal.new("skill.registry.updated", %{}, source: "/skill_registry"),
          {:ok, _recorded} <- Bus.publish(bus_name, [signal]) do
@@ -2412,12 +2626,26 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end
   end
 
+  defp assert_permission_blocked_telemetry(skill_name, route, reason, tools) do
+    assert_receive {:telemetry, @telemetry_event, %{count: 1}, metadata}, 1_000
+
+    assert metadata.type == "skill.permission.blocked"
+    assert metadata.source == "/permissions/skill/permission/blocked"
+    assert metadata.skill_name == skill_name
+    assert metadata.route == route
+    assert metadata.reason == reason
+    assert metadata.tools == tools
+    assert is_binary(metadata.timestamp)
+  end
+
   defp write_skill(root, dir_name, skill_name, route, opts \\ []) do
     skill_dir = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_dir)
 
     pre_signal_type = Keyword.get(opts, :pre_signal_type)
     pre_enabled = Keyword.fetch(opts, :pre_enabled)
+    allowed_tools = Keyword.get(opts, :allowed_tools)
+    allowed_tools_line = if is_nil(allowed_tools), do: "", else: "allowed-tools: #{allowed_tools}\n"
 
     hooks_block =
       case {pre_signal_type, pre_enabled} do
@@ -2445,6 +2673,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     name: #{skill_name}
     description: Subscriber registry test skill #{skill_name}
     version: 1.0.0
+    #{allowed_tools_line}
     jido:
       actions:
         - JidoSkill.Observability.TestActions.HookSignal
@@ -2456,6 +2685,31 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     """
 
     File.write!(Path.join(skill_dir, "SKILL.md"), content)
+  end
+
+  defp write_settings(path, permissions) do
+    settings = %{
+      "version" => "2.0.0",
+      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "permissions" => permissions,
+      "hooks" => %{
+        "pre" => %{
+          "enabled" => false,
+          "signal_type" => "skill/pre",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        },
+        "post" => %{
+          "enabled" => false,
+          "signal_type" => "skill/post",
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        }
+      }
+    }
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, Jason.encode!(settings))
   end
 
   defp tmp_dir(prefix) do
