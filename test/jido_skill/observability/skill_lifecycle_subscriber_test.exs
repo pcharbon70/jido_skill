@@ -73,7 +73,8 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
       hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
       hook_defaults_error: Keyword.get(opts, :hook_defaults_error),
       list_skills_error: Keyword.get(opts, :list_skills_error),
-      bus_name: Keyword.get(opts, :bus_name)
+      bus_name: Keyword.get(opts, :bus_name),
+      bus_name_error: Keyword.get(opts, :bus_name_error)
     }
 
     name = Keyword.get(opts, :name)
@@ -86,6 +87,13 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+
+  def set_bus_name(server, bus_name),
+    do: GenServer.call(server, {:set_bus_name, bus_name})
+
+  def set_bus_name_error(server, value),
+    do: GenServer.call(server, {:set_bus_name_error, value})
+
   def set_hook_defaults_error(server, value),
     do: GenServer.call(server, {:set_hook_defaults_error, value})
   def set_list_skills_error(server, value),
@@ -96,7 +104,19 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
 
   @impl GenServer
   def handle_call(:bus_name, _from, state) do
-    {:reply, state.bus_name, state}
+    case state.bus_name_error do
+      nil ->
+        {:reply, state.bus_name, state}
+
+      {:invalid_return, value} ->
+        {:reply, value, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
   end
 
   @impl GenServer
@@ -136,6 +156,16 @@ defmodule JidoSkill.Observability.LifecycleSubscriberTestRegistry do
   @impl GenServer
   def handle_call({:set_skills, skills}, _from, state) do
     {:reply, :ok, %{state | skills: skills}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_bus_name, bus_name}, _from, state) do
+    {:reply, :ok, %{state | bus_name: bus_name}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_bus_name_error, value}, _from, state) do
+    {:reply, :ok, %{state | bus_name_error: value}}
   end
 
   @impl GenServer
@@ -946,6 +976,212 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
                "/hooks/skill/pre",
                "after-reload-new-bus"
              )
+  end
+
+  test "keeps cached lifecycle bus when bus_name lookup is invalid and migrates after recovery" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [],
+           hook_defaults: %{},
+           bus_name: reloaded_bus_name,
+           bus_name_error: {:invalid_return, :invalid_bus_name}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: registry,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-refresh")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "before-refresh" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == old_bus_name and
+        state.registry_subscription == initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-invalid")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "after-invalid" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = LifecycleSubscriberTestRegistry.set_bus_name_error(registry, nil)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == reloaded_bus_name and
+        state.registry_subscription != initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-recovery-old-bus")
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          reloaded_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-recovery-new-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "after-recovery-new-bus" and
+            metadata.bus == reloaded_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "preserves cached lifecycle bus when bus_name lookup raises during refresh" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [skills: [], hook_defaults: %{}, bus_name: old_bus_name]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: registry,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-raise")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "before-raise" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = LifecycleSubscriberTestRegistry.set_bus_name(registry, reloaded_bus_name)
+
+    assert :ok =
+             LifecycleSubscriberTestRegistry.set_bus_name_error(
+               registry,
+               {:raise, RuntimeError.exception("bus_name_failed")}
+             )
+
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == old_bus_name and
+        state.registry_subscription == initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    assert_eventually(fn ->
+      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-raise-old-bus")
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and metadata.skill_name == "after-raise-old-bus" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok = publish_lifecycle_signal(reloaded_bus_name, "skill.pre", "/hooks/skill/pre", "after-raise-new-bus")
+      end,
+      6,
+      80
+    )
   end
 
   test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
