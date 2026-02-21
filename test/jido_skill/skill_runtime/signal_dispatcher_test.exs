@@ -1286,6 +1286,108 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_exception_registry_update"}, 1_000
   end
 
+  test "refreshes hook-aware routes while preserving cached hook defaults when hook defaults call raises call exceptions" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [hook_aware_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "before_call_exception_hook_defaults_refresh"
+             )
+
+    assert_receive {:action_ran, "before_call_exception_hook_defaults_refresh"}, 1_000
+    assert_receive {:signal, pre_before_refresh}, 1_000
+    assert pre_before_refresh.type == "skill.pre"
+    assert pre_before_refresh.data["route"] == "demo/hook_one"
+    assert_receive {:signal, post_before_refresh}, 1_000
+    assert post_before_refresh.type == "skill.post"
+    assert post_before_refresh.data["route"] == "demo/hook_one"
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [hook_aware_dispatcher_skill_entry_two()])
+
+    lookup_plan =
+      start_supervised!(
+        {Agent, fn ->
+          %{count: 0, fail_on: MapSet.new([2, 4])}
+        end}
+      )
+
+    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+
+    :sys.replace_state(dispatcher, fn state ->
+      %{state | registry: exception_registry}
+    end)
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_two"]
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_two",
+               "after_call_exception_hook_defaults_refresh"
+             )
+
+    assert_receive {:action_ran, "after_call_exception_hook_defaults_refresh"}, 1_000
+    assert_receive {:signal, pre_after_refresh}, 1_000
+    assert pre_after_refresh.type == "skill.pre"
+    assert pre_after_refresh.data["route"] == "demo/hook_two"
+    assert_receive {:signal, post_after_refresh}, 1_000
+    assert post_after_refresh.type == "skill.post"
+    assert post_after_refresh.data["route"] == "demo/hook_two"
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "old_hook_after_refresh")
+    refute_receive {:action_ran, "old_hook_after_refresh"}, 200
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_two"]
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_two",
+               "after_call_exception_hook_defaults_registry_update"
+             )
+
+    assert_receive {:action_ran, "after_call_exception_hook_defaults_registry_update"}, 1_000
+    assert_receive {:signal, pre_after_registry_update}, 1_000
+    assert pre_after_registry_update.type == "skill.pre"
+    assert pre_after_registry_update.data["route"] == "demo/hook_two"
+    assert_receive {:signal, post_after_registry_update}, 1_000
+    assert post_after_registry_update.type == "skill.post"
+    assert post_after_registry_update.data["route"] == "demo/hook_two"
+  end
+
   test "refreshes routes while preserving cached hook defaults on invalid hook defaults returns" do
     set_notify_pid!()
 
