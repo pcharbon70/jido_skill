@@ -115,7 +115,8 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
       hook_defaults: Keyword.get(opts, :hook_defaults, %{}),
       hook_defaults_error: Keyword.get(opts, :hook_defaults_error),
       list_skills_error: Keyword.get(opts, :list_skills_error),
-      bus_name: Keyword.get(opts, :bus_name)
+      bus_name: Keyword.get(opts, :bus_name),
+      bus_name_error: Keyword.get(opts, :bus_name_error)
     }
 
     name = Keyword.get(opts, :name)
@@ -128,6 +129,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   end
 
   def set_skills(server, skills), do: GenServer.call(server, {:set_skills, skills})
+
+  def set_bus_name(server, bus_name),
+    do: GenServer.call(server, {:set_bus_name, bus_name})
+
+  def set_bus_name_error(server, value),
+    do: GenServer.call(server, {:set_bus_name_error, value})
+
   def set_hook_defaults_error(server, value), do: GenServer.call(server, {:set_hook_defaults_error, value})
   def set_list_skills_error(server, value), do: GenServer.call(server, {:set_list_skills_error, value})
 
@@ -136,7 +144,19 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
 
   @impl GenServer
   def handle_call(:bus_name, _from, state) do
-    {:reply, state.bus_name, state}
+    case state.bus_name_error do
+      nil ->
+        {:reply, state.bus_name, state}
+
+      {:invalid_return, value} ->
+        {:reply, value, state}
+
+      {:exit, reason} ->
+        exit(reason)
+
+      {:raise, error} ->
+        raise error
+    end
   end
 
   @impl GenServer
@@ -176,6 +196,16 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   @impl GenServer
   def handle_call({:set_skills, skills}, _from, state) do
     {:reply, :ok, %{state | skills: skills}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_bus_name, bus_name}, _from, state) do
+    {:reply, :ok, %{state | bus_name: bus_name}}
+  end
+
+  @impl GenServer
+  def handle_call({:set_bus_name_error, value}, _from, state) do
+    {:reply, :ok, %{state | bus_name_error: value}}
   end
 
   @impl GenServer
@@ -886,6 +916,123 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
                "demo.signal_bus_invalid",
                "after_reload_new_bus"
              )
+  end
+
+  test "keeps configured bus when bus_name lookup is invalid during startup and migrates after recovery" do
+    set_notify_pid!()
+
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           bus_name: reloaded_bus_name,
+           bus_name_error: {:invalid_return, :invalid_bus_name}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher,
+         [name: nil, bus_name: old_bus_name, refresh_bus_name: true, registry: registry]}
+      )
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :sys.get_state(dispatcher).bus_name == old_bus_name
+
+    assert :ok = publish_dispatch_signal(old_bus_name, "demo.rollback", "before_bus_name_recovery")
+    assert_receive {:action_ran, "before_bus_name_recovery"}, 1_000
+
+    assert :ok = SignalDispatcherTestRegistry.set_bus_name_error(registry, nil)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      dispatcher_state.bus_name == reloaded_bus_name and
+        Map.has_key?(dispatcher_state.route_subscriptions, "demo.rollback")
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "after_bus_name_recovery_old_bus"
+             )
+
+    refute_receive {:action_ran, "after_bus_name_recovery_old_bus"}, 300
+
+    assert :ok =
+             publish_dispatch_signal(
+               reloaded_bus_name,
+               "demo.rollback",
+               "after_bus_name_recovery_new_bus"
+             )
+
+    assert_receive {:action_ran, "after_bus_name_recovery_new_bus"}, 1_000
+  end
+
+  test "preserves cached signal bus dispatch when bus_name lookup raises during refresh" do
+    set_notify_pid!()
+
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [skills: [valid_dispatcher_skill_entry()], bus_name: old_bus_name]}
+      )
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher,
+         [name: nil, bus_name: old_bus_name, refresh_bus_name: true, registry: registry]}
+      )
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :sys.get_state(dispatcher).bus_name == old_bus_name
+
+    assert :ok = publish_dispatch_signal(old_bus_name, "demo.rollback", "before_bus_name_raise")
+    assert_receive {:action_ran, "before_bus_name_raise"}, 1_000
+
+    assert :ok = SignalDispatcherTestRegistry.set_bus_name(registry, reloaded_bus_name)
+    assert :ok = SignalDispatcherTestRegistry.set_bus_name_error(registry, {:raise, RuntimeError.exception("bus_name_failed")})
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      dispatcher_state.bus_name == old_bus_name and
+        Map.has_key?(dispatcher_state.route_subscriptions, "demo.rollback")
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "after_bus_name_raise_old_bus"
+             )
+
+    assert_receive {:action_ran, "after_bus_name_raise_old_bus"}, 1_000
+
+    assert :ok =
+             publish_dispatch_signal(
+               reloaded_bus_name,
+               "demo.rollback",
+               "after_bus_name_raise_new_bus"
+             )
+
+    refute_receive {:action_ran, "after_bus_name_raise_new_bus"}, 300
   end
 
   test "preserves existing route subscriptions when refresh fails adding new routes" do
