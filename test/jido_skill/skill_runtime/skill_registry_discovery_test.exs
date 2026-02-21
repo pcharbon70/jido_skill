@@ -218,6 +218,84 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     assert skills == ["alpha", "zeta"]
   end
 
+  test "reload refreshes hook defaults from settings files when settings are present" do
+    tmp = tmp_dir("reload_hook_defaults")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "alpha", "alpha", "1.0.0", "Alpha")
+
+    local_settings_path = Path.join(local_root, "settings.json")
+    write_settings(local_settings_path, "skill/reloaded/pre", "skill/reloaded/post")
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    initial_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/pre", bus: bus_name, data: %{}},
+      post: %{enabled: true, signal_type: "skill/post", bus: bus_name, data: %{}}
+    }
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: initial_hook_defaults
+        ]
+      })
+
+    assert SkillRegistry.hook_defaults(registry) == initial_hook_defaults
+    assert :ok = SkillRegistry.reload(registry)
+
+    assert %{pre: pre_hook, post: post_hook} = SkillRegistry.hook_defaults(registry)
+    assert pre_hook.signal_type == "skill/reloaded/pre"
+    assert pre_hook.bus == :jido_code_bus
+    assert post_hook.signal_type == "skill/reloaded/post"
+    assert post_hook.bus == :jido_code_bus
+  end
+
+  test "reload keeps cached hook defaults when settings reload fails" do
+    tmp = tmp_dir("reload_hook_defaults_invalid")
+    global_root = Path.join(tmp, "global")
+    local_root = Path.join(tmp, "local")
+
+    write_skill(local_root, "alpha", "alpha", "1.0.0", "Alpha")
+
+    local_settings_path = Path.join(local_root, "settings.json")
+    File.mkdir_p!(Path.dirname(local_settings_path))
+    File.write!(local_settings_path, "{invalid")
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Jido.Signal.Bus, [name: bus_name, middleware: []]})
+
+    initial_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/pre", bus: bus_name, data: %{}},
+      post: %{enabled: true, signal_type: "skill/post", bus: bus_name, data: %{}}
+    }
+
+    registry =
+      start_supervised!({
+        SkillRegistry,
+        [
+          name: nil,
+          bus_name: bus_name,
+          global_path: global_root,
+          local_path: local_root,
+          settings_path: local_settings_path,
+          hook_defaults: initial_hook_defaults
+        ]
+      })
+
+    assert SkillRegistry.hook_defaults(registry) == initial_hook_defaults
+    assert :ok = SkillRegistry.reload(registry)
+    assert SkillRegistry.hook_defaults(registry) == initial_hook_defaults
+  end
+
   defp write_skill(root, dir_name, skill_name, version, description, opts \\ []) do
     skill_path = Path.join([root, "skills", dir_name])
     File.mkdir_p!(skill_path)
@@ -240,6 +318,31 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     """
 
     File.write!(Path.join(skill_path, "SKILL.md"), content)
+  end
+
+  defp write_settings(path, pre_signal_type, post_signal_type) do
+    settings = %{
+      "version" => "2.0.0",
+      "signal_bus" => %{"name" => "jido_code_bus", "middleware" => []},
+      "permissions" => %{"allow" => [], "deny" => [], "ask" => []},
+      "hooks" => %{
+        "pre" => %{
+          "enabled" => true,
+          "signal_type" => pre_signal_type,
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        },
+        "post" => %{
+          "enabled" => true,
+          "signal_type" => post_signal_type,
+          "bus" => ":jido_code_bus",
+          "data_template" => %{}
+        }
+      }
+    }
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, Jason.encode!(settings))
   end
 
   defp allowed_tools_line(nil), do: ""

@@ -10,6 +10,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
   alias Jido.Signal
   alias Jido.Signal.Bus
+  alias JidoSkill.Config.Settings
   alias JidoSkill.SkillRuntime.Skill
 
   require Logger
@@ -121,7 +122,12 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
   @impl GenServer
   def handle_call(:reload, _from, state) do
-    new_state = load_all_skills(%{state | skills: %{}})
+    new_state =
+      state
+      |> Map.put(:skills, %{})
+      |> load_all_skills()
+      |> refresh_hook_defaults_from_settings()
+
     publish_registry_update(new_state)
     {:reply, :ok, new_state}
   end
@@ -151,6 +157,65 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
     %{state | skills: merged_skills}
   end
+
+  defp refresh_hook_defaults_from_settings(state) do
+    case load_hook_defaults_from_settings(state) do
+      {:ok, hook_defaults} ->
+        %{state | hook_defaults: hook_defaults}
+
+      :skip ->
+        state
+
+      {:error, reason} ->
+        Logger.warning(
+          "failed to reload hook defaults from settings; keeping cached defaults: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  defp load_hook_defaults_from_settings(state) do
+    case settings_load_opts(state) do
+      :skip ->
+        :skip
+
+      load_opts ->
+        case Settings.load(load_opts) do
+          {:ok, settings} -> {:ok, settings.hooks}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp settings_load_opts(state) do
+    global_settings_path = settings_path_for_root(state.global_path)
+    local_settings_path = local_settings_path(state)
+
+    settings_paths =
+      [global_settings_path, local_settings_path]
+      |> Enum.reject(&is_nil/1)
+
+    if Enum.any?(settings_paths, &File.exists?/1) do
+      []
+      |> maybe_put_settings_path(:global_settings_path, global_settings_path)
+      |> maybe_put_settings_path(:local_settings_path, local_settings_path)
+    else
+      :skip
+    end
+  end
+
+  defp settings_path_for_root(nil), do: nil
+  defp settings_path_for_root(root), do: Path.join(root, "settings.json")
+
+  defp local_settings_path(%{settings_path: settings_path}) when is_binary(settings_path),
+    do: settings_path
+
+  defp local_settings_path(%{local_path: local_path}),
+    do: settings_path_for_root(local_path)
+
+  defp maybe_put_settings_path(opts, _key, nil), do: opts
+  defp maybe_put_settings_path(opts, key, path), do: Keyword.put(opts, key, path)
 
   defp scope_root(state, :global), do: expand_root(state.global_path)
   defp scope_root(state, :local), do: expand_root(state.local_path)
