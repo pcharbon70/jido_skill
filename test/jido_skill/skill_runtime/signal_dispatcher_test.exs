@@ -1040,6 +1040,86 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_exception_refresh"}, 1_000
   end
 
+  test "preserves hook-aware routes and cached hook defaults when list_skills call raises call exceptions during refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [hook_aware_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "before_exception_refresh")
+    assert_receive {:action_ran, "before_exception_refresh"}, 1_000
+    assert_receive {:signal, pre_before_refresh}, 1_000
+    assert pre_before_refresh.type == "skill.pre"
+    assert pre_before_refresh.data["route"] == "demo/hook_one"
+    assert_receive {:signal, post_before_refresh}, 1_000
+    assert post_before_refresh.type == "skill.post"
+    assert post_before_refresh.data["route"] == "demo/hook_one"
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [hook_aware_dispatcher_skill_entry_two()])
+
+    lookup_plan =
+      start_supervised!(
+        {Agent, fn ->
+          %{count: 0, fail_on: MapSet.new([1, 2])}
+        end}
+      )
+
+    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+
+    :sys.replace_state(dispatcher, fn state ->
+      %{state | registry: exception_registry}
+    end)
+
+    assert {:error, {:list_skills_failed, {:exception, %ArgumentError{}}}} =
+             SignalDispatcher.refresh(dispatcher)
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_exception_refresh")
+    assert_receive {:action_ran, "after_exception_refresh"}, 1_000
+    assert_receive {:signal, pre_after_refresh}, 1_000
+    assert pre_after_refresh.type == "skill.pre"
+    assert pre_after_refresh.data["route"] == "demo/hook_one"
+    assert_receive {:signal, post_after_refresh}, 1_000
+    assert post_after_refresh.type == "skill.post"
+    assert post_after_refresh.data["route"] == "demo/hook_one"
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_two", "new_route_should_not_dispatch")
+    refute_receive {:action_ran, "new_route_should_not_dispatch"}, 200
+
+    dispatcher_state = :sys.get_state(dispatcher)
+    assert dispatcher_state.hook_defaults == cached_hook_defaults
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_exception_registry_update")
+    assert_receive {:action_ran, "after_exception_registry_update"}, 1_000
+  end
+
   test "refreshes routes while keeping cached hook defaults when hook defaults fail" do
     set_notify_pid!()
 
