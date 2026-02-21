@@ -918,6 +918,67 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
              )
   end
 
+  test "falls back to configured bus when startup migration target is unavailable and migrates after recovery" do
+    set_notify_pid!()
+
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [skills: [valid_dispatcher_skill_entry()], bus_name: reloaded_bus_name]}
+      )
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher,
+         [name: nil, bus_name: old_bus_name, refresh_bus_name: true, registry: registry]}
+      )
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :sys.get_state(dispatcher).bus_name == old_bus_name
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "before_startup_bus_recovery"
+             )
+
+    assert_receive {:action_ran, "before_startup_bus_recovery"}, 1_000
+
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      dispatcher_state.bus_name == reloaded_bus_name and
+        Map.has_key?(dispatcher_state.route_subscriptions, "demo.rollback")
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "after_startup_bus_recovery_old_bus"
+             )
+
+    refute_receive {:action_ran, "after_startup_bus_recovery_old_bus"}, 300
+
+    assert :ok =
+             publish_dispatch_signal(
+               reloaded_bus_name,
+               "demo.rollback",
+               "after_startup_bus_recovery_new_bus"
+             )
+
+    assert_receive {:action_ran, "after_startup_bus_recovery_new_bus"}, 1_000
+  end
+
   test "keeps configured bus when bus_name lookup is invalid during startup and migrates after recovery" do
     set_notify_pid!()
 
