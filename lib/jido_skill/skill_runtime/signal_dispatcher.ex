@@ -20,10 +20,13 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   require Logger
 
+  @registry_update_signal_type "skill.registry.updated"
+
   @type route_handlers :: %{optional(String.t()) => [map()]}
 
   @type t :: %{
           bus_name: atom() | String.t(),
+          refresh_bus_name: boolean(),
           registry: GenServer.server(),
           registry_subscription: String.t() | nil,
           hook_defaults: map(),
@@ -61,6 +64,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
     initial_state = %{
       bus_name: bus_name,
+      refresh_bus_name: Keyword.get(opts, :refresh_bus_name, false),
       registry: registry,
       registry_subscription: nil,
       hook_defaults: %{},
@@ -69,7 +73,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
     }
 
     with {:ok, registry_subscription} <-
-           subscribe(bus_name, normalize_path("skill/registry/updated")),
+           subscribe(bus_name, @registry_update_signal_type),
          {:ok, refreshed_state} <-
            init_state_with_route_fallback(%{
              initial_state
@@ -137,26 +141,127 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp refresh_state(state, mode) do
-    with {:ok, handlers} <- build_route_handlers(state.registry, mode),
-         target_routes = Map.keys(handlers),
-         {:ok, route_subscriptions} <-
+    with {:ok, handlers} <- build_route_handlers(state.registry, mode) do
+      target_routes = Map.keys(handlers)
+      {target_bus_name, bus_refresh_error} = resolve_target_bus_name(state)
+
+      with {:ok, subscription_state} <-
+             sync_dispatch_subscriptions(state, target_bus_name, target_routes, mode) do
+        {hook_defaults, hook_defaults_refresh_error} =
+          resolve_hook_defaults(state.registry, state.hook_defaults)
+
+        log_bus_refresh_error(bus_refresh_error, mode)
+        log_hook_defaults_refresh_error(hook_defaults_refresh_error, mode)
+
+        {:ok,
+         %{
+           subscription_state
+           | hook_defaults: hook_defaults,
+             route_handlers: handlers
+         }}
+      end
+    end
+  end
+
+  defp resolve_target_bus_name(%{refresh_bus_name: true} = state),
+    do: resolve_bus_name(state.registry, state.bus_name)
+
+  defp resolve_target_bus_name(state), do: {state.bus_name, nil}
+
+  defp sync_dispatch_subscriptions(state, target_bus_name, target_routes, mode) do
+    if target_bus_name == state.bus_name do
+      with {:ok, route_subscriptions} <-
+             sync_route_subscriptions(
+               target_bus_name,
+               state.route_subscriptions,
+               target_routes
+             ) do
+        {:ok, %{state | route_subscriptions: route_subscriptions}}
+      end
+    else
+      case migrate_dispatch_subscriptions(state, target_bus_name, target_routes) do
+        {:ok, migrated_state} ->
+          {:ok, migrated_state}
+
+        {:error, reason} ->
+          handle_bus_migration_error(reason, state, target_routes, mode)
+      end
+    end
+  end
+
+  defp migrate_dispatch_subscriptions(state, target_bus_name, target_routes) do
+    case subscribe(target_bus_name, @registry_update_signal_type) do
+      {:ok, target_registry_subscription} ->
+        case sync_route_subscriptions(target_bus_name, %{}, target_routes) do
+          {:ok, target_route_subscriptions} ->
+            retire_dispatch_subscriptions(state)
+
+            {:ok,
+             %{
+               state
+               | bus_name: target_bus_name,
+                 registry_subscription: target_registry_subscription,
+                 route_subscriptions: target_route_subscriptions
+             }}
+
+          {:error, reason} ->
+            maybe_unsubscribe(
+              target_bus_name,
+              target_registry_subscription,
+              @registry_update_signal_type
+            )
+
+            {:error, {:bus_migration_failed, {:route_subscriptions, target_bus_name, reason}}}
+        end
+
+      {:error, reason} ->
+        {:error, {:bus_migration_failed, {:registry_subscription, target_bus_name, reason}}}
+    end
+  end
+
+  defp handle_bus_migration_error(reason, state, target_routes, :empty) do
+    Logger.warning(
+      "failed to migrate dispatcher signal bus during startup; continuing with configured bus #{inspect(state.bus_name)}: #{inspect(reason)}"
+    )
+
+    with {:ok, route_subscriptions} <-
            sync_route_subscriptions(
              state.bus_name,
              state.route_subscriptions,
              target_routes
            ) do
-      {hook_defaults, hook_defaults_refresh_error} =
-        resolve_hook_defaults(state.registry, state.hook_defaults)
+      {:ok, %{state | route_subscriptions: route_subscriptions}}
+    end
+  end
 
-      log_hook_defaults_refresh_error(hook_defaults_refresh_error, mode)
+  defp handle_bus_migration_error(reason, _state, _target_routes, :error),
+    do: {:error, reason}
 
-      {:ok,
-       %{
-         state
-         | hook_defaults: hook_defaults,
-           route_subscriptions: route_subscriptions,
-           route_handlers: handlers
-       }}
+  defp retire_dispatch_subscriptions(state) do
+    _remaining_routes =
+      unsubscribe_routes(
+        state.bus_name,
+        state.route_subscriptions,
+        Map.keys(state.route_subscriptions)
+      )
+
+    maybe_unsubscribe(state.bus_name, state.registry_subscription, @registry_update_signal_type)
+    :ok
+  end
+
+  defp maybe_unsubscribe(_bus_name, nil, _path), do: :ok
+
+  defp maybe_unsubscribe(bus_name, subscription_id, path) do
+    case Bus.unsubscribe(bus_name, subscription_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "failed to unsubscribe path #{path} (#{subscription_id}) on #{inspect(bus_name)}: #{inspect(reason)}"
+        )
+
+        :ok
     end
   end
 
@@ -511,6 +616,55 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
       {:error, reason} ->
         {current_hook_defaults, reason}
     end
+  end
+
+  defp safe_bus_name(registry) do
+    case GenServer.call(registry, :bus_name) do
+      nil ->
+        {:ok, nil}
+
+      bus_name when is_atom(bus_name) or is_binary(bus_name) ->
+        {:ok, bus_name}
+
+      other ->
+        {:error, {:bus_name_failed, {:invalid_result, other}}}
+    end
+  rescue
+    error ->
+      {:error, {:bus_name_failed, {:exception, error}}}
+  catch
+    :exit, reason ->
+      {:error, {:bus_name_failed, {:exit, reason}}}
+
+    kind, reason ->
+      {:error, {:bus_name_failed, {kind, reason}}}
+  end
+
+  defp resolve_bus_name(registry, current_bus_name) do
+    case safe_bus_name(registry) do
+      {:ok, nil} ->
+        {current_bus_name, nil}
+
+      {:ok, bus_name} ->
+        {bus_name, nil}
+
+      {:error, reason} ->
+        {current_bus_name, reason}
+    end
+  end
+
+  defp log_bus_refresh_error(nil, _mode), do: :ok
+
+  defp log_bus_refresh_error(reason, :empty) do
+    Logger.warning(
+      "failed to load dispatcher signal bus during startup; continuing with configured bus: #{inspect(reason)}"
+    )
+  end
+
+  defp log_bus_refresh_error(reason, :error) do
+    Logger.warning(
+      "failed to refresh dispatcher signal bus; keeping cached bus: #{inspect(reason)}"
+    )
   end
 
   defp log_hook_defaults_refresh_error(nil, _mode), do: :ok

@@ -25,7 +25,8 @@ defmodule JidoSkill.Application do
              hook_defaults: settings.hooks,
              permissions: settings.permissions
            ]},
-          {JidoSkill.SkillRuntime.SignalDispatcher, [bus_name: bus_name]},
+          {JidoSkill.SkillRuntime.SignalDispatcher,
+           [bus_name: bus_name, refresh_bus_name: true]},
           {JidoSkill.Observability.SkillLifecycleSubscriber,
            [
              bus_name: bus_name,
