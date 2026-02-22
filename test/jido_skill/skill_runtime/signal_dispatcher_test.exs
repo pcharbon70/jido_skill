@@ -1088,6 +1088,100 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "after_bus_name_recovery_new_bus"}, 1_000
   end
 
+  test "keeps configured bus when startup bus_name lookup stays invalid across refreshes and migrates after recovery" do
+    set_notify_pid!()
+
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [valid_dispatcher_skill_entry()],
+           bus_name: reloaded_bus_name,
+           bus_name_error: {:invalid_return, :invalid_bus_name}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher,
+         [name: nil, bus_name: old_bus_name, refresh_bus_name: true, registry: registry]}
+      )
+
+    assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
+    assert :sys.get_state(dispatcher).bus_name == old_bus_name
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "before_startup_invalid_repeated_refresh"
+             )
+
+    assert_receive {:action_ran, "before_startup_invalid_repeated_refresh"}, 1_000
+
+    assert :ok = publish_registry_update_signal(old_bus_name)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      dispatcher_state.bus_name == old_bus_name and
+        Map.has_key?(dispatcher_state.route_subscriptions, "demo.rollback")
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "after_startup_invalid_repeated_refresh_old_bus"
+             )
+
+    assert_receive {:action_ran, "after_startup_invalid_repeated_refresh_old_bus"}, 1_000
+
+    assert :ok =
+             publish_dispatch_signal(
+               reloaded_bus_name,
+               "demo.rollback",
+               "after_startup_invalid_repeated_refresh_new_bus"
+             )
+
+    refute_receive {:action_ran, "after_startup_invalid_repeated_refresh_new_bus"}, 300
+
+    assert :ok = SignalDispatcherTestRegistry.set_bus_name_error(registry, nil)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      dispatcher_state = :sys.get_state(dispatcher)
+
+      dispatcher_state.bus_name == reloaded_bus_name and
+        Map.has_key?(dispatcher_state.route_subscriptions, "demo.rollback")
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "after_startup_invalid_recovery_old_bus"
+             )
+
+    refute_receive {:action_ran, "after_startup_invalid_recovery_old_bus"}, 300
+
+    assert :ok =
+             publish_dispatch_signal(
+               reloaded_bus_name,
+               "demo.rollback",
+               "after_startup_invalid_recovery_new_bus"
+             )
+
+    assert_receive {:action_ran, "after_startup_invalid_recovery_new_bus"}, 1_000
+  end
+
   test "preserves cached signal bus dispatch when bus_name lookup stays invalid during refresh and migrates after recovery" do
     set_notify_pid!()
 
