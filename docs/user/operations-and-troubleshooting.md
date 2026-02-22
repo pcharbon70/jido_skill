@@ -1,0 +1,86 @@
+# Operations and Troubleshooting
+
+This guide covers common runtime operations and failure checks.
+
+## Daily Operations
+
+Reload skills and settings:
+
+```elixir
+JidoSkill.SkillRuntime.SkillRegistry.reload()
+```
+
+Inspect loaded skills:
+
+```elixir
+JidoSkill.SkillRuntime.SkillRegistry.list_skills()
+```
+
+Inspect active routes:
+
+```elixir
+JidoSkill.SkillRuntime.SignalDispatcher.routes()
+```
+
+## Runtime Health Checks
+
+From IEx:
+
+```elixir
+Process.alive?(Process.whereis(JidoSkill.SkillRuntime.SkillRegistry))
+Process.alive?(Process.whereis(JidoSkill.SkillRuntime.SignalDispatcher))
+Process.alive?(Process.whereis(JidoSkill.Observability.SkillLifecycleSubscriber))
+```
+
+## Common Issues
+
+### Startup fails with invalid settings
+
+- Cause: schema/validation failure in `settings.json`.
+- Check for unknown keys and invalid formats.
+- Validate against:
+  - `schemas/settings.schema.json`
+
+### Skills are not discovered
+
+- Ensure files are named `SKILL.md`.
+- Confirm location under:
+  - `~/.jido_code/skills/...`
+  - `.jido_code/skills/...`
+- Check required frontmatter fields and valid `jido` section.
+
+### Route signals do not dispatch
+
+- Confirm route is present in `SignalDispatcher.routes/0`.
+- Publish using dot-normalized type (`pdf.extract.text`), not slash path.
+- Ensure action modules are compiled and loadable.
+
+### Hook signals missing
+
+- Verify global hooks enabled in settings.
+- Verify frontmatter did not disable with `enabled: false`.
+- Ensure hook `signal_type` and `bus` values are valid.
+
+### Permission blocked execution
+
+- Check `allowed-tools` in skill frontmatter.
+- Check `permissions.allow|deny|ask` patterns in settings.
+- Look for `skill.permission.blocked` signals and `reason`.
+
+## Bus Migration and Fallback Behavior
+
+Dispatcher and lifecycle subscriber support resilient refresh behavior:
+
+- On refresh target-bus lookup failures, they keep cached subscriptions.
+- On recovery, they migrate subscriptions to the resolved bus.
+- Registry updates are published to both previous and current bus names when needed.
+
+If you see warnings about failed migration/subscription, confirm the target bus exists and then trigger a registry reload.
+
+## Recommended Validation Commands
+
+```bash
+mix test
+mix credo
+mix dialyzer
+```
