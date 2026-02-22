@@ -2462,6 +2462,69 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert recovered_state.hook_defaults == cached_hook_defaults
   end
 
+  test "starts with routes when initial hook defaults read keeps returning invalid data across refreshes and recovers hook emission on refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [hook_aware_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults,
+           hook_defaults_error: {:invalid_return, :hook_defaults_unavailable}
+         ]}
+      )
+
+    dispatcher =
+      start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+    assert :sys.get_state(dispatcher).hook_defaults == %{}
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "before_repeated_startup_hook_invalid_failure")
+    assert_receive {:action_ran, "before_repeated_startup_hook_invalid_failure"}, 1_000
+    refute_receive {:signal, _hook_signal_before_repeated_startup_hook_invalid_failure}, 200
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert :sys.get_state(dispatcher).hook_defaults == %{}
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_first_repeated_startup_hook_invalid_failure")
+    assert_receive {:action_ran, "after_first_repeated_startup_hook_invalid_failure"}, 1_000
+    refute_receive {:signal, _hook_signal_after_first_repeated_startup_hook_invalid_failure}, 200
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    assert :sys.get_state(dispatcher).hook_defaults == %{}
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_second_repeated_startup_hook_invalid_failure")
+    assert_receive {:action_ran, "after_second_repeated_startup_hook_invalid_failure"}, 1_000
+    refute_receive {:signal, _hook_signal_after_second_repeated_startup_hook_invalid_failure}, 200
+
+    assert :ok = SignalDispatcherTestRegistry.set_hook_defaults_error(registry, nil)
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+
+    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_repeated_startup_hook_invalid_recovery")
+    assert_receive {:action_ran, "after_repeated_startup_hook_invalid_recovery"}, 1_000
+    assert_receive {:signal, pre_signal}, 1_000
+    assert pre_signal.type == "skill.pre"
+    assert pre_signal.data["route"] == "demo/hook_one"
+    assert_receive {:signal, post_signal}, 1_000
+    assert post_signal.type == "skill.post"
+    assert post_signal.data["route"] == "demo/hook_one"
+
+    recovered_state = :sys.get_state(dispatcher)
+    assert recovered_state.hook_defaults == cached_hook_defaults
+  end
+
   test "starts with empty routes when initial route subscription fails and recovers after registry update" do
     set_notify_pid!()
 
