@@ -1488,7 +1488,7 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
-  test "preserves cached lifecycle bus when bus_name lookup keeps raising call exceptions during refresh" do
+  test "preserves cached lifecycle bus when bus_name lookup keeps raising call exceptions during refresh and migrates after recovery" do
     old_bus_name = "bus_#{System.unique_integer([:positive])}"
     reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
 
@@ -1603,6 +1603,52 @@ defmodule JidoSkill.Observability.SkillLifecycleSubscriberTest do
       6,
       80
     )
+
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == reloaded_bus_name and
+        state.registry_subscription != initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            old_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-repeated-call-exception-refresh-recovery-old-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          reloaded_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-repeated-call-exception-refresh-recovery-new-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "after-repeated-call-exception-refresh-recovery-new-bus" and
+            metadata.bus == reloaded_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
   end
 
   test "surfaces timestamp from lifecycle signal payload in telemetry metadata" do
