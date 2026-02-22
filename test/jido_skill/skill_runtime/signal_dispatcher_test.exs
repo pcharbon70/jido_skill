@@ -2358,7 +2358,7 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
