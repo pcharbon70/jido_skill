@@ -1,4 +1,4 @@
-defmodule JidoSkill.SkillRuntime.Skill do
+defmodule Jido.Code.Skill.SkillRuntime.Skill do
   @moduledoc """
   Skill runtime contract and markdown compiler.
 
@@ -14,10 +14,10 @@ defmodule JidoSkill.SkillRuntime.Skill do
 
   defmacro __using__(opts) do
     quote do
-      @behaviour JidoSkill.SkillRuntime.Skill
+      @behaviour Jido.Code.Skill.SkillRuntime.Skill
 
+      alias Jido.Code.Skill.SkillRuntime.HookEmitter
       alias Jido.Instruction
-      alias JidoSkill.SkillRuntime.HookEmitter
 
       @skill_name unquote(opts[:name])
       @skill_description unquote(opts[:description])
@@ -38,13 +38,13 @@ defmodule JidoSkill.SkillRuntime.Skill do
         }
       end
 
-      @impl JidoSkill.SkillRuntime.Skill
+      @impl Jido.Code.Skill.SkillRuntime.Skill
       def mount(context, _config), do: {:ok, context}
 
-      @impl JidoSkill.SkillRuntime.Skill
+      @impl Jido.Code.Skill.SkillRuntime.Skill
       def router(_config), do: @skill_router
 
-      @impl JidoSkill.SkillRuntime.Skill
+      @impl Jido.Code.Skill.SkillRuntime.Skill
       def handle_signal(signal, skill_opts) do
         case find_matching_route(signal, @skill_router) do
           nil ->
@@ -74,7 +74,7 @@ defmodule JidoSkill.SkillRuntime.Skill do
         end
       end
 
-      @impl JidoSkill.SkillRuntime.Skill
+      @impl Jido.Code.Skill.SkillRuntime.Skill
       def transform_result(result, action, skill_opts) do
         global_hooks = Keyword.get(skill_opts, :global_hooks, %{})
         route = route_for_action(action, @skill_router)
@@ -689,7 +689,7 @@ defmodule JidoSkill.SkillRuntime.Skill do
 
       quoted =
         quote do
-          use JidoSkill.SkillRuntime.Skill,
+          use Jido.Code.Skill.SkillRuntime.Skill,
             name: unquote(normalized.name),
             description: unquote(normalized.description),
             version: unquote(normalized.version),
@@ -769,9 +769,11 @@ defmodule JidoSkill.SkillRuntime.Skill do
   end
 
   defp generated_module_name?(module_name) when is_atom(module_name) do
+    prefix = Module.split(Jido.Code.Skill.CompiledSkills)
+
     module_name
     |> Module.split()
-    |> Enum.take(2) == ["JidoSkill", "CompiledSkills"]
+    |> Enum.take(length(prefix)) == prefix
   end
 
   defp action_module_from_ref(action_ref) when is_binary(action_ref) do
@@ -832,7 +834,7 @@ defmodule JidoSkill.SkillRuntime.Skill do
       |> Base.encode16(case: :lower)
       |> binary_part(0, 10)
 
-    Module.concat([JidoSkill, CompiledSkills, "Skill#{hash}"])
+    Module.concat([Jido.Code.Skill, CompiledSkills, "Skill#{hash}"])
   end
 
   defp strip_quotes(value) do

@@ -1,6 +1,6 @@
-defmodule JidoSkill do
+defmodule Jido.Code.Skill do
   @moduledoc """
-  Documentation for `JidoSkill`.
+  Documentation for `Jido.Code.Skill`.
   """
 
   @doc """
@@ -8,7 +8,7 @@ defmodule JidoSkill do
 
   ## Examples
 
-      iex> JidoSkill.hello()
+      iex> Jido.Code.Skill.hello()
       :world
 
   """

@@ -1,4 +1,4 @@
-defmodule JidoSkill.Config do
+defmodule Jido.Code.Skill.Config do
   @moduledoc """
   Runtime configuration accessor for the skill runtime.
 
@@ -6,7 +6,7 @@ defmodule JidoSkill.Config do
   schema-backed loading and merge semantics without changing call sites.
   """
 
-  alias JidoSkill.Config.Settings
+  alias Jido.Code.Skill.Config.Settings
 
   @app :jido_skill
 

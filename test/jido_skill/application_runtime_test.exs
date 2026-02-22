@@ -1,11 +1,11 @@
-defmodule JidoSkill.ApplicationRuntimeTest do
+defmodule Jido.Code.Skill.ApplicationRuntimeTest do
   use ExUnit.Case, async: false
 
+  alias Jido.Code.Skill.Config
+  alias Jido.Code.Skill.Observability.SkillLifecycleSubscriber
+  alias Jido.Code.Skill.SkillRuntime.SignalDispatcher
+  alias Jido.Code.Skill.SkillRuntime.SkillRegistry
   alias Jido.Signal.Bus
-  alias JidoSkill.Config
-  alias JidoSkill.Observability.SkillLifecycleSubscriber
-  alias JidoSkill.SkillRuntime.SignalDispatcher
-  alias JidoSkill.SkillRuntime.SkillRegistry
 
   test "starts the phase 1 runtime children" do
     {:ok, settings} = Config.load_settings()

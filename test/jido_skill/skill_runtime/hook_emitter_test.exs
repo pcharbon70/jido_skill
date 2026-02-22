@@ -1,8 +1,8 @@
-defmodule JidoSkill.SkillRuntime.HookEmitterTest do
+defmodule Jido.Code.Skill.SkillRuntime.HookEmitterTest do
   use ExUnit.Case, async: false
 
+  alias Jido.Code.Skill.SkillRuntime.HookEmitter
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.HookEmitter
 
   test "uses global pre hook and interpolates template values" do
     bus_name = "bus_#{System.unique_integer([:positive])}"

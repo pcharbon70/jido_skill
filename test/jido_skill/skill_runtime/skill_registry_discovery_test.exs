@@ -1,11 +1,11 @@
-defmodule JidoSkill.TestActions.DiscoveryAction do
+defmodule Jido.Code.Skill.TestActions.DiscoveryAction do
 end
 
-defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
+defmodule Jido.Code.Skill.SkillRuntime.SkillRegistryDiscoveryTest do
   use ExUnit.Case, async: false
 
+  alias Jido.Code.Skill.SkillRuntime.SkillRegistry
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.SkillRegistry
 
   test "discovers skills from global and local paths with local precedence" do
     tmp = tmp_dir("discovery")
@@ -493,7 +493,7 @@ defmodule JidoSkill.SkillRuntime.SkillRegistryDiscoveryTest do
     #{allowed_tools_line(allowed_tools)}
     jido:
       actions:
-        - JidoSkill.TestActions.DiscoveryAction
+        - Jido.Code.Skill.TestActions.DiscoveryAction
       router:
         - "skill/#{skill_name}/run": DiscoveryAction
     ---

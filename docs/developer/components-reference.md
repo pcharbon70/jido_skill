@@ -2,13 +2,13 @@
 
 This guide maps each runtime component to its responsibilities and API surface.
 
-## `JidoSkill.Config`
+## `Jido.Code.Skill.Config`
 
 Responsibilities:
 
 - Read static app env defaults (`signal_bus_name`, middleware, paths).
 - Expose canonical runtime paths (`global_path`, `local_path`, `settings_path`, `skill_paths`).
-- Delegate structured settings loading to `JidoSkill.Config.Settings`.
+- Delegate structured settings loading to `Jido.Code.Skill.Config.Settings`.
 
 Key functions:
 
@@ -17,7 +17,7 @@ Key functions:
 - `global_path/0`, `local_path/0`, `settings_path/0`, `skill_paths/0`
 - `load_settings/1`
 
-## `JidoSkill.Config.Settings`
+## `Jido.Code.Skill.Config.Settings`
 
 Responsibilities:
 
@@ -32,7 +32,7 @@ Important behavior:
 - Hook config supports only `pre` and `post`.
 - Hook `data_template` accepts only scalar JSON values.
 
-## `JidoSkill.SkillRuntime.Skill`
+## `Jido.Code.Skill.SkillRuntime.Skill`
 
 Responsibilities:
 
@@ -46,7 +46,7 @@ Important behavior:
 - `transform_result/3` emits `post` and returns `{:ok, transformed_result, emitted_signals}`.
 - Compiler validates frontmatter shape, resolves action modules, checks router references, and purges/rebuilds generated modules safely.
 
-## `JidoSkill.SkillRuntime.SkillRegistry`
+## `Jido.Code.Skill.SkillRuntime.SkillRegistry`
 
 Responsibilities:
 
@@ -69,7 +69,7 @@ Important behavior:
 - Same-scope duplicate names are deterministic (`Path.wildcard` sorted; first wins, rest logged).
 - Reload publishes `skill.registry.updated` on both previous and refreshed bus names (when different) to support migration.
 
-## `JidoSkill.SkillRuntime.SignalDispatcher`
+## `Jido.Code.Skill.SkillRuntime.SignalDispatcher`
 
 Responsibilities:
 
@@ -90,7 +90,7 @@ Important behavior:
 - Route conflict priority is local scope first, then lexical skill name.
 - Refresh logic preserves cached subscriptions when registry reads, bus migration, or route subscribe steps fail.
 
-## `JidoSkill.SkillRuntime.HookEmitter`
+## `Jido.Code.Skill.SkillRuntime.HookEmitter`
 
 Responsibilities:
 
@@ -104,7 +104,7 @@ Important behavior:
 - Runtime data fields override template collisions (`phase`, `skill_name`, `route`, `status`, `timestamp`).
 - Signal type is published in dot form, source path remains slash form.
 
-## `JidoSkill.Observability.SkillLifecycleSubscriber`
+## `Jido.Code.Skill.Observability.SkillLifecycleSubscriber`
 
 Responsibilities:
 

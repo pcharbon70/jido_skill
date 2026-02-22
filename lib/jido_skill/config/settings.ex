@@ -1,11 +1,11 @@
-defmodule JidoSkill.Config.Settings do
+defmodule Jido.Code.Skill.Config.Settings do
   @moduledoc """
   Loads and validates runtime settings from global and local JSON files.
 
   Merge order: defaults <- global <- local.
   """
 
-  alias JidoSkill.Config
+  alias Jido.Code.Skill.Config
 
   @type hook_config :: %{
           enabled: boolean(),

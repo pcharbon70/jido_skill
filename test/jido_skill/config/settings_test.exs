@@ -1,7 +1,7 @@
-defmodule JidoSkill.Config.SettingsTest do
+defmodule Jido.Code.Skill.Config.SettingsTest do
   use ExUnit.Case, async: true
 
-  alias JidoSkill.Config.Settings
+  alias Jido.Code.Skill.Config.Settings
 
   test "loads defaults when settings files are missing" do
     tmp_dir = tmp_dir()

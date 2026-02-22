@@ -2,7 +2,7 @@
 
 ## Config Loader
 
-- [x] Added `JidoSkill.Config.Settings` loader for optional global/local settings files.
+- [x] Added `Jido.Code.Skill.Config.Settings` loader for optional global/local settings files.
 - [x] Implemented merge order `defaults <- global <- local`.
 - [x] Kept local settings as precedence winner.
 
@@ -14,7 +14,7 @@
 
 ## Runtime Wiring
 
-- [x] `JidoSkill.Application` now loads validated settings before starting children.
+- [x] `Jido.Code.Skill.Application` now loads validated settings before starting children.
 - [x] Signal bus name and middleware are sourced from normalized settings.
 - [x] `SkillRegistry` receives normalized hook defaults from settings.
 

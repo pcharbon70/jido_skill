@@ -1,8 +1,11 @@
-defmodule JidoSkillTest do
+defmodule Jido.Code.SkillTest do
   use ExUnit.Case
-  doctest JidoSkill
+
+  alias Jido.Code.Skill
+
+  doctest Skill
 
   test "greets the world" do
-    assert JidoSkill.hello() == :world
+    assert Skill.hello() == :world
   end
 end

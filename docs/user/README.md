@@ -1,6 +1,6 @@
 # User Guides
 
-This directory contains user-facing guides for running and operating the current JidoSkill runtime.
+This directory contains user-facing guides for running and operating the current Jido.Code.Skill runtime.
 
 ## Guide Index
 

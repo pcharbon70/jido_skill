@@ -4,21 +4,21 @@ This runtime is a small OTP application that loads settings, compiles/discovers 
 
 ## Runtime Boundaries
 
-- Entry point: `JidoSkill.Application`.
-- Configuration and merge rules: `JidoSkill.Config` and `JidoSkill.Config.Settings`.
-- Skill discovery and cached metadata: `JidoSkill.SkillRuntime.SkillRegistry`.
-- Signal route dispatch and execution: `JidoSkill.SkillRuntime.SignalDispatcher`.
-- Hook emission: `JidoSkill.SkillRuntime.HookEmitter` (called by compiled skill modules).
-- Observability subscriber: `JidoSkill.Observability.SkillLifecycleSubscriber`.
+- Entry point: `Jido.Code.Skill.Application`.
+- Configuration and merge rules: `Jido.Code.Skill.Config` and `Jido.Code.Skill.Config.Settings`.
+- Skill discovery and cached metadata: `Jido.Code.Skill.SkillRuntime.SkillRegistry`.
+- Signal route dispatch and execution: `Jido.Code.Skill.SkillRuntime.SignalDispatcher`.
+- Hook emission: `Jido.Code.Skill.SkillRuntime.HookEmitter` (called by compiled skill modules).
+- Observability subscriber: `Jido.Code.Skill.Observability.SkillLifecycleSubscriber`.
 
 ## Supervision Topology
 
 ```mermaid
 graph TD
-  A["JidoSkill.Application"] --> B["Jido.Signal.Bus"]
-  A --> C["JidoSkill.SkillRuntime.SkillRegistry"]
-  A --> D["JidoSkill.SkillRuntime.SignalDispatcher"]
-  A --> E["JidoSkill.Observability.SkillLifecycleSubscriber"]
+  A["Jido.Code.Skill.Application"] --> B["Jido.Signal.Bus"]
+  A --> C["Jido.Code.Skill.SkillRuntime.SkillRegistry"]
+  A --> D["Jido.Code.Skill.SkillRuntime.SignalDispatcher"]
+  A --> E["Jido.Code.Skill.Observability.SkillLifecycleSubscriber"]
 
   C -- "registry state" --> D
   C -- "registry state" --> E
@@ -32,7 +32,7 @@ graph TD
 
 ```mermaid
 sequenceDiagram
-  participant App as JidoSkill.Application
+  participant App as Jido.Code.Skill.Application
   participant Settings as Config.Settings
   participant Bus as Jido.Signal.Bus
   participant Registry as SkillRegistry

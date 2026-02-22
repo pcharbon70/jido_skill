@@ -4,7 +4,7 @@ This guide explains how `SKILL.md` files become executable runtime modules.
 
 ## Frontmatter Parse Model
 
-`JidoSkill.SkillRuntime.Skill.from_markdown/1` parses markdown in stages:
+`Jido.Code.Skill.SkillRuntime.Skill.from_markdown/1` parses markdown in stages:
 
 1. Split YAML frontmatter from body.
 2. Parse root keys and `jido` section with indentation-sensitive rules.
@@ -39,7 +39,7 @@ Accepted `jido` keys:
 ## Module Naming and Conflicts
 
 - If `jido.skill_module` is present, the compiler uses that module name.
-- Otherwise a deterministic generated module name is derived from skill source path hash under `JidoSkill.CompiledSkills`.
+- Otherwise a deterministic generated module name is derived from skill source path hash under `Jido.Code.Skill.CompiledSkills`.
 - If a module already exists and was generated from the same source path, recompilation is allowed.
 - If a module already exists from a different source or non-generated runtime module, compilation fails with conflict errors.
 

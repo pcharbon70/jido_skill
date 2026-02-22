@@ -2,21 +2,21 @@
 
 ## Runtime Skeleton
 
-- [x] Added `JidoSkill.SkillRuntime.SkillRegistry` scaffold.
-- [x] Added `JidoSkill.SkillRuntime.HookEmitter` scaffold.
-- [x] Added `JidoSkill.SkillRuntime.Skill` contract/macro scaffold.
-- [x] Added `JidoSkill.Observability.SkillLifecycleSubscriber` scaffold.
+- [x] Added `Jido.Code.Skill.SkillRuntime.SkillRegistry` scaffold.
+- [x] Added `Jido.Code.Skill.SkillRuntime.HookEmitter` scaffold.
+- [x] Added `Jido.Code.Skill.SkillRuntime.Skill` contract/macro scaffold.
+- [x] Added `Jido.Code.Skill.Observability.SkillLifecycleSubscriber` scaffold.
 
 ## Supervision Wiring
 
-- [x] Added `Jido.Signal.Bus` child under `JidoSkill.Application`.
-- [x] Added `SkillRegistry` child under `JidoSkill.Application`.
-- [x] Added lifecycle subscriber child under `JidoSkill.Application`.
+- [x] Added `Jido.Signal.Bus` child under `Jido.Code.Skill.Application`.
+- [x] Added `SkillRegistry` child under `Jido.Code.Skill.Application`.
+- [x] Added lifecycle subscriber child under `Jido.Code.Skill.Application`.
 
 ## Configuration Defaults
 
 - [x] Added `config/config.exs` runtime defaults for bus and paths.
-- [x] Added `JidoSkill.Config` accessor module.
+- [x] Added `Jido.Code.Skill.Config` accessor module.
 
 ## Validation
 

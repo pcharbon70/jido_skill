@@ -1,13 +1,13 @@
-defmodule JidoSkill.TestActions.ExtractPdfText do
+defmodule Jido.Code.Skill.TestActions.ExtractPdfText do
 end
 
-defmodule JidoSkill.TestActions.ExtractPdfTables do
+defmodule Jido.Code.Skill.TestActions.ExtractPdfTables do
 end
 
-defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
+defmodule Jido.Code.Skill.SkillRuntime.SkillCompilerTest do
   use ExUnit.Case, async: true
 
-  alias JidoSkill.SkillRuntime.Skill
+  alias Jido.Code.Skill.SkillRuntime.Skill
 
   test "compiles a valid skill markdown file into a runtime module" do
     tmp = tmp_dir("valid")
@@ -23,8 +23,8 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       allowed-tools: Read, Write, Bash(python:*)
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
-          - JidoSkill.TestActions.ExtractPdfTables
+          - Jido.Code.Skill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfTables
         router:
           - "pdf/extract/text": ExtractPdfText
           - "pdf/extract/tables": ExtractPdfTables
@@ -59,13 +59,13 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     assert module.allowed_tools() == ["Read", "Write", "Bash(python:*)"]
 
     assert module.actions() == [
-             JidoSkill.TestActions.ExtractPdfText,
-             JidoSkill.TestActions.ExtractPdfTables
+             Jido.Code.Skill.TestActions.ExtractPdfText,
+             Jido.Code.Skill.TestActions.ExtractPdfTables
            ]
 
     assert metadata.router == [
-             {"pdf/extract/text", JidoSkill.TestActions.ExtractPdfText},
-             {"pdf/extract/tables", JidoSkill.TestActions.ExtractPdfTables}
+             {"pdf/extract/text", Jido.Code.Skill.TestActions.ExtractPdfText},
+             {"pdf/extract/tables", Jido.Code.Skill.TestActions.ExtractPdfTables}
            ]
 
     assert is_binary(module.skill_documentation())
@@ -84,7 +84,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---
@@ -131,7 +131,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
         command: "not-supported"
@@ -155,7 +155,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/Extract/Text": ExtractPdfText
       ---
@@ -178,7 +178,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract-text": ExtractPdfText
       ---
@@ -188,7 +188,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     assert {:ok, module} = Skill.from_markdown(path)
 
     assert module.skill_metadata().router == [
-             {"pdf/extract-text", JidoSkill.TestActions.ExtractPdfText}
+             {"pdf/extract-text", Jido.Code.Skill.TestActions.ExtractPdfText}
            ]
   end
 
@@ -205,7 +205,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
         hooks:
@@ -234,7 +234,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
         hooks:
@@ -262,7 +262,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       version: 1.0.0
       jido:
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
         hooks:
@@ -286,7 +286,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     tmp = tmp_dir("skill_module_override")
     path = Path.join(tmp, "SKILL.md")
 
-    module_ref = "JidoSkill.TestCompiledSkills.Skill#{System.unique_integer([:positive])}"
+    module_ref = "Jido.Code.Skill.TestCompiledSkills.Skill#{System.unique_integer([:positive])}"
     module = module_ref |> String.split(".") |> Module.concat()
 
     File.write!(
@@ -299,7 +299,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       jido:
         skill_module: #{module_ref}
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---
@@ -321,16 +321,16 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       description: Invalid skill module format
       version: 1.0.0
       jido:
-        skill_module: "JidoSkill.Invalid-Module"
+        skill_module: "Jido.Code.Skill.Invalid-Module"
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---
       """
     )
 
-    assert {:error, {:invalid_skill_module, "JidoSkill.Invalid-Module"}} =
+    assert {:error, {:invalid_skill_module, "Jido.Code.Skill.Invalid-Module"}} =
              Skill.from_markdown(path)
   end
 
@@ -346,16 +346,16 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       description: Should not override runtime modules
       version: 1.0.0
       jido:
-        skill_module: JidoSkill.SkillRuntime.Skill
+        skill_module: Jido.Code.Skill.SkillRuntime.Skill
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---
       """
     )
 
-    assert {:error, {:skill_module_already_defined, JidoSkill.SkillRuntime.Skill}} =
+    assert {:error, {:skill_module_already_defined, Jido.Code.Skill.SkillRuntime.Skill}} =
              Skill.from_markdown(path)
   end
 
@@ -363,7 +363,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
     tmp = tmp_dir("skill_module_conflict")
 
     shared_module_ref =
-      "JidoSkill.TestCompiledSkills.Conflict#{System.unique_integer([:positive])}"
+      "Jido.Code.Skill.TestCompiledSkills.Conflict#{System.unique_integer([:positive])}"
 
     shared_module = shared_module_ref |> String.split(".") |> Module.concat()
     path_one = Path.join(tmp, "one_SKILL.md")
@@ -379,7 +379,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       jido:
         skill_module: #{shared_module_ref}
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---
@@ -396,7 +396,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       jido:
         skill_module: #{shared_module_ref}
         actions:
-          - JidoSkill.TestActions.ExtractPdfTables
+          - Jido.Code.Skill.TestActions.ExtractPdfTables
         router:
           - "pdf/extract/tables": ExtractPdfTables
       ---
@@ -412,7 +412,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
   test "allows recompiling explicit skill_module from the same source path" do
     tmp = tmp_dir("skill_module_recompile")
     path = Path.join(tmp, "SKILL.md")
-    module_ref = "JidoSkill.TestCompiledSkills.Recompile#{System.unique_integer([:positive])}"
+    module_ref = "Jido.Code.Skill.TestCompiledSkills.Recompile#{System.unique_integer([:positive])}"
     module = module_ref |> String.split(".") |> Module.concat()
 
     File.write!(
@@ -425,7 +425,7 @@ defmodule JidoSkill.SkillRuntime.SkillCompilerTest do
       jido:
         skill_module: #{module_ref}
         actions:
-          - JidoSkill.TestActions.ExtractPdfText
+          - Jido.Code.Skill.TestActions.ExtractPdfText
         router:
           - "pdf/extract/text": ExtractPdfText
       ---

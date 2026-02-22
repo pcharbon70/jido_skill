@@ -1,4 +1,4 @@
-defmodule JidoSkill.DispatcherTestActions.Notify do
+defmodule Jido.Code.Skill.DispatcherTestActions.Notify do
   use Jido.Action,
     name: "dispatcher_notify",
     description: "Sends a message to a target process for dispatcher tests",
@@ -16,63 +16,63 @@ defmodule JidoSkill.DispatcherTestActions.Notify do
   end
 end
 
-defmodule JidoSkill.DispatcherTestSkills.ValidRoute do
+defmodule Jido.Code.Skill.DispatcherTestSkills.ValidRoute do
   alias Jido.Instruction
 
   def skill_metadata do
-    %{router: [{"demo/rollback", JidoSkill.DispatcherTestActions.Notify}]}
+    %{router: [{"demo/rollback", Jido.Code.Skill.DispatcherTestActions.Notify}]}
   end
 
   def handle_signal(signal, _opts) do
-    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+    Instruction.new(action: Jido.Code.Skill.DispatcherTestActions.Notify, params: signal.data)
   end
 
   def transform_result(result, _instruction, _opts), do: {:ok, result, []}
 end
 
-defmodule JidoSkill.DispatcherTestSkills.InvalidRoute do
+defmodule Jido.Code.Skill.DispatcherTestSkills.InvalidRoute do
   alias Jido.Instruction
 
   def skill_metadata do
-    %{router: [{123, JidoSkill.DispatcherTestActions.Notify}]}
+    %{router: [{123, Jido.Code.Skill.DispatcherTestActions.Notify}]}
   end
 
   def handle_signal(signal, _opts) do
-    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+    Instruction.new(action: Jido.Code.Skill.DispatcherTestActions.Notify, params: signal.data)
   end
 
   def transform_result(result, _instruction, _opts), do: {:ok, result, []}
 end
 
-defmodule JidoSkill.DispatcherTestSkills.ValidRouteTwo do
+defmodule Jido.Code.Skill.DispatcherTestSkills.ValidRouteTwo do
   alias Jido.Instruction
 
   def skill_metadata do
-    %{router: [{"demo/second", JidoSkill.DispatcherTestActions.Notify}]}
+    %{router: [{"demo/second", Jido.Code.Skill.DispatcherTestActions.Notify}]}
   end
 
   def handle_signal(signal, _opts) do
-    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+    Instruction.new(action: Jido.Code.Skill.DispatcherTestActions.Notify, params: signal.data)
   end
 
   def transform_result(result, _instruction, _opts), do: {:ok, result, []}
 end
 
-defmodule JidoSkill.DispatcherTestSkills.HookAwareRoute do
+defmodule Jido.Code.Skill.DispatcherTestSkills.HookAwareRoute do
+  alias Jido.Code.Skill.SkillRuntime.HookEmitter
   alias Jido.Instruction
-  alias JidoSkill.SkillRuntime.HookEmitter
 
   @route "demo/hook_one"
   @skill_name "hook-aware-one"
 
   def skill_metadata do
-    %{router: [{@route, JidoSkill.DispatcherTestActions.Notify}]}
+    %{router: [{@route, Jido.Code.Skill.DispatcherTestActions.Notify}]}
   end
 
   def handle_signal(signal, opts) do
     global_hooks = Keyword.get(opts, :global_hooks, %{})
     HookEmitter.emit_pre(@skill_name, @route, %{}, global_hooks)
-    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+    Instruction.new(action: Jido.Code.Skill.DispatcherTestActions.Notify, params: signal.data)
   end
 
   def transform_result(result, _instruction, opts) do
@@ -82,21 +82,21 @@ defmodule JidoSkill.DispatcherTestSkills.HookAwareRoute do
   end
 end
 
-defmodule JidoSkill.DispatcherTestSkills.HookAwareRouteTwo do
+defmodule Jido.Code.Skill.DispatcherTestSkills.HookAwareRouteTwo do
+  alias Jido.Code.Skill.SkillRuntime.HookEmitter
   alias Jido.Instruction
-  alias JidoSkill.SkillRuntime.HookEmitter
 
   @route "demo/hook_two"
   @skill_name "hook-aware-two"
 
   def skill_metadata do
-    %{router: [{@route, JidoSkill.DispatcherTestActions.Notify}]}
+    %{router: [{@route, Jido.Code.Skill.DispatcherTestActions.Notify}]}
   end
 
   def handle_signal(signal, opts) do
     global_hooks = Keyword.get(opts, :global_hooks, %{})
     HookEmitter.emit_pre(@skill_name, @route, %{}, global_hooks)
-    Instruction.new(action: JidoSkill.DispatcherTestActions.Notify, params: signal.data)
+    Instruction.new(action: Jido.Code.Skill.DispatcherTestActions.Notify, params: signal.data)
   end
 
   def transform_result(result, _instruction, opts) do
@@ -106,7 +106,7 @@ defmodule JidoSkill.DispatcherTestSkills.HookAwareRouteTwo do
   end
 end
 
-defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
+defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTestRegistry do
   use GenServer
 
   def start_link(opts) do
@@ -219,7 +219,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTestRegistry do
   end
 end
 
-defmodule JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia do
+defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia do
   def whereis_name({registry, lookup_plan}) do
     {lookup_index, fail_lookup?} =
       Agent.get_and_update(lookup_plan, fn %{count: count, fail_on: fail_on} = state ->
@@ -245,14 +245,14 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia do
   def send(_name, _message), do: :badarg
 end
 
-defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
+defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
   use ExUnit.Case, async: false
 
+  alias Jido.Code.Skill.SkillRuntime.SignalDispatcher
+  alias Jido.Code.Skill.SkillRuntime.SignalDispatcherTestRegistry
+  alias Jido.Code.Skill.SkillRuntime.SkillRegistry
   alias Jido.Signal
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.SignalDispatcher
-  alias JidoSkill.SkillRuntime.SignalDispatcherTestRegistry
-  alias JidoSkill.SkillRuntime.SkillRegistry
 
   test "dispatches matching signals to skills and emits lifecycle hooks" do
     set_notify_pid!()
@@ -1363,7 +1363,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -1437,7 +1437,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -1536,7 +1536,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -1602,7 +1602,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -1941,7 +1941,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         end}
       )
 
-    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -2014,7 +2014,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
       )
 
     exception_registry =
-      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -2298,7 +2298,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         end}
       )
 
-    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -2527,7 +2527,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         end}
       )
 
-    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2701,7 +2701,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         end}
       )
 
-    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2779,7 +2779,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
         end}
       )
 
-    exception_registry = {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2998,7 +2998,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     #{allowed_tools_line(allowed_tools)}
     jido:
       actions:
-        - JidoSkill.DispatcherTestActions.Notify
+        - Jido.Code.Skill.DispatcherTestActions.Notify
       router:
         - "#{route}": Notify
     #{hooks_block}
@@ -3082,10 +3082,10 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
   end
 
   defp set_notify_pid! do
-    :persistent_term.put({JidoSkill.DispatcherTestActions.Notify, :notify_pid}, self())
+    :persistent_term.put({Jido.Code.Skill.DispatcherTestActions.Notify, :notify_pid}, self())
 
     on_exit(fn ->
-      :persistent_term.erase({JidoSkill.DispatcherTestActions.Notify, :notify_pid})
+      :persistent_term.erase({Jido.Code.Skill.DispatcherTestActions.Notify, :notify_pid})
     end)
   end
 
@@ -3116,7 +3116,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{
       name: "valid-route-skill",
       scope: :local,
-      module: JidoSkill.DispatcherTestSkills.ValidRoute,
+      module: Jido.Code.Skill.DispatcherTestSkills.ValidRoute,
       permission_status: :allowed
     }
   end
@@ -3125,7 +3125,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{
       name: "invalid-route-skill",
       scope: :local,
-      module: JidoSkill.DispatcherTestSkills.InvalidRoute,
+      module: Jido.Code.Skill.DispatcherTestSkills.InvalidRoute,
       permission_status: :allowed
     }
   end
@@ -3134,7 +3134,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{
       name: "valid-route-skill-two",
       scope: :local,
-      module: JidoSkill.DispatcherTestSkills.ValidRouteTwo,
+      module: Jido.Code.Skill.DispatcherTestSkills.ValidRouteTwo,
       permission_status: :allowed
     }
   end
@@ -3143,7 +3143,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{
       name: "hook-aware-route-skill",
       scope: :local,
-      module: JidoSkill.DispatcherTestSkills.HookAwareRoute,
+      module: Jido.Code.Skill.DispatcherTestSkills.HookAwareRoute,
       permission_status: :allowed
     }
   end
@@ -3152,7 +3152,7 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     %{
       name: "hook-aware-route-skill-two",
       scope: :local,
-      module: JidoSkill.DispatcherTestSkills.HookAwareRouteTwo,
+      module: Jido.Code.Skill.DispatcherTestSkills.HookAwareRouteTwo,
       permission_status: :allowed
     }
   end
