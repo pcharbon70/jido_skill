@@ -1,4 +1,4 @@
-defmodule JidoSkill.Contracts.SkillFrontmatterSchemaTest do
+defmodule Jido.Code.Skill.Contracts.SkillFrontmatterSchemaTest do
   use ExUnit.Case, async: true
 
   test "allows hyphenated router segments and validates skill_module format" do

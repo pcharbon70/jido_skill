@@ -9,7 +9,7 @@
 ## Module Ownership Metadata
 
 - [x] Compiled skill modules expose ownership markers used for safe recompilation checks.
-- [x] Backward-compatible generated module namespace (`JidoSkill.CompiledSkills.*`) remains purgeable.
+- [x] Backward-compatible generated module namespace (`Jido.Code.Skill.CompiledSkills.*`) remains purgeable.
 
 ## Validation
 

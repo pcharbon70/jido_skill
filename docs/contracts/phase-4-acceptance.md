@@ -2,7 +2,7 @@
 
 ## Frontmatter Parser And Compiler
 
-- [x] Implemented `JidoSkill.SkillRuntime.Skill.from_markdown/1` parser/compiler pipeline.
+- [x] Implemented `Jido.Code.Skill.SkillRuntime.Skill.from_markdown/1` parser/compiler pipeline.
 - [x] Supports extracting YAML frontmatter + markdown body.
 - [x] Parses and normalizes `name`, `description`, `version`, `allowed-tools`, `jido.actions`, `jido.router`, and `jido.hooks`.
 - [x] Compiles deterministic runtime modules from skill file paths.

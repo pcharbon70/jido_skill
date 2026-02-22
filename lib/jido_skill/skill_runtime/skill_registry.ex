@@ -1,4 +1,4 @@
-defmodule JidoSkill.SkillRuntime.SkillRegistry do
+defmodule Jido.Code.Skill.SkillRuntime.SkillRegistry do
   @moduledoc """
   Registry for discovered skill definitions and hook defaults.
 
@@ -8,10 +8,10 @@ defmodule JidoSkill.SkillRuntime.SkillRegistry do
 
   use GenServer
 
+  alias Jido.Code.Skill.Config.Settings
+  alias Jido.Code.Skill.SkillRuntime.Skill
   alias Jido.Signal
   alias Jido.Signal.Bus
-  alias JidoSkill.Config.Settings
-  alias JidoSkill.SkillRuntime.Skill
 
   require Logger
 

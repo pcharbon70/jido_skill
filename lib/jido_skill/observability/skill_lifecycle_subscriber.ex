@@ -1,4 +1,4 @@
-defmodule JidoSkill.Observability.SkillLifecycleSubscriber do
+defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriber do
   @moduledoc """
   Subscribes to skill lifecycle and permission signals and emits telemetry.
 

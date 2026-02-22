@@ -1,4 +1,4 @@
-defmodule JidoSkill.Contracts.SettingsSchemaTest do
+defmodule Jido.Code.Skill.Contracts.SettingsSchemaTest do
   use ExUnit.Case, async: true
 
   test "allows middleware opts to be object or null" do

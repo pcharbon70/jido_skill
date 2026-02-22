@@ -86,7 +86,7 @@ On reload:
 Reload through:
 
 ```elixir
-JidoSkill.SkillRuntime.SkillRegistry.reload()
+Jido.Code.Skill.SkillRuntime.SkillRegistry.reload()
 ```
 
 Reload updates:

@@ -7,19 +7,19 @@ This guide covers common runtime operations and failure checks.
 Reload skills and settings:
 
 ```elixir
-JidoSkill.SkillRuntime.SkillRegistry.reload()
+Jido.Code.Skill.SkillRuntime.SkillRegistry.reload()
 ```
 
 Inspect loaded skills:
 
 ```elixir
-JidoSkill.SkillRuntime.SkillRegistry.list_skills()
+Jido.Code.Skill.SkillRuntime.SkillRegistry.list_skills()
 ```
 
 Inspect active routes:
 
 ```elixir
-JidoSkill.SkillRuntime.SignalDispatcher.routes()
+Jido.Code.Skill.SkillRuntime.SignalDispatcher.routes()
 ```
 
 ## Runtime Health Checks
@@ -27,9 +27,9 @@ JidoSkill.SkillRuntime.SignalDispatcher.routes()
 From IEx:
 
 ```elixir
-Process.alive?(Process.whereis(JidoSkill.SkillRuntime.SkillRegistry))
-Process.alive?(Process.whereis(JidoSkill.SkillRuntime.SignalDispatcher))
-Process.alive?(Process.whereis(JidoSkill.Observability.SkillLifecycleSubscriber))
+Process.alive?(Process.whereis(Jido.Code.Skill.SkillRuntime.SkillRegistry))
+Process.alive?(Process.whereis(Jido.Code.Skill.SkillRuntime.SignalDispatcher))
+Process.alive?(Process.whereis(Jido.Code.Skill.Observability.SkillLifecycleSubscriber))
 ```
 
 ## Common Issues

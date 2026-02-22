@@ -1,7 +1,7 @@
-defmodule JidoSkill.SkillRuntime.SkillRegistryTest do
+defmodule Jido.Code.Skill.SkillRuntime.SkillRegistryTest do
   use ExUnit.Case, async: false
 
-  alias JidoSkill.SkillRuntime.SkillRegistry
+  alias Jido.Code.Skill.SkillRuntime.SkillRegistry
 
   test "registry scaffold APIs work" do
     assert %{pre: pre_hook, post: post_hook} = SkillRegistry.hook_defaults()

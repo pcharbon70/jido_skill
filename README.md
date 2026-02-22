@@ -1,4 +1,4 @@
-# JidoSkill
+# Jido.Code.Skill
 
 **TODO: Add description**
 

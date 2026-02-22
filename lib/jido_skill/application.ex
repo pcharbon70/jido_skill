@@ -1,11 +1,15 @@
-defmodule JidoSkill.Application do
+defmodule Jido.Code.Skill.Application do
   @moduledoc false
 
   use Application
 
+  alias Jido.Code.Skill.Config
+  alias Jido.Code.Skill.Observability.SkillLifecycleSubscriber
+  alias Jido.Code.Skill.SkillRuntime.{SignalDispatcher, SkillRegistry}
+
   @impl true
   def start(_type, _args) do
-    case JidoSkill.Config.load_settings() do
+    case Config.load_settings() do
       {:ok, settings} ->
         bus_name = settings.signal_bus.name
         hook_signal_types = lifecycle_signal_types(settings.hooks)
@@ -16,28 +20,27 @@ defmodule JidoSkill.Application do
              name: bus_name,
              middleware: settings.signal_bus.middleware
            ]},
-          {JidoSkill.SkillRuntime.SkillRegistry,
+          {SkillRegistry,
            [
              bus_name: bus_name,
-             global_path: JidoSkill.Config.global_path(),
-             local_path: JidoSkill.Config.local_path(),
-             settings_path: JidoSkill.Config.settings_path(),
+             global_path: Config.global_path(),
+             local_path: Config.local_path(),
+             settings_path: Config.settings_path(),
              hook_defaults: settings.hooks,
              permissions: settings.permissions
            ]},
-          {JidoSkill.SkillRuntime.SignalDispatcher,
-           [bus_name: bus_name, refresh_bus_name: true]},
-          {JidoSkill.Observability.SkillLifecycleSubscriber,
+          {SignalDispatcher, [bus_name: bus_name, refresh_bus_name: true]},
+          {SkillLifecycleSubscriber,
            [
              bus_name: bus_name,
              refresh_bus_name: true,
              hook_signal_types: hook_signal_types,
              fallback_to_default_hook_signal_types: false,
-             registry: JidoSkill.SkillRuntime.SkillRegistry
+             registry: SkillRegistry
            ]}
         ]
 
-        opts = [strategy: :one_for_one, name: JidoSkill.Supervisor]
+        opts = [strategy: :one_for_one, name: Jido.Code.Skill.Supervisor]
         Supervisor.start_link(children, opts)
 
       {:error, reason} ->

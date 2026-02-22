@@ -1,4 +1,4 @@
-defmodule JidoSkill.SkillRuntime.SignalDispatcher do
+defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcher do
   @moduledoc """
   Subscribes to compiled skill routes on the signal bus and dispatches matching
   signals to skill modules for execution.
@@ -13,10 +13,10 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcher do
 
   use GenServer
 
+  alias Jido.Code.Skill.SkillRuntime.SkillRegistry
   alias Jido.Instruction
   alias Jido.Signal
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.SkillRegistry
 
   require Logger
 

@@ -1,4 +1,4 @@
-defmodule JidoSkill.SkillRuntime.HookEmitter do
+defmodule Jido.Code.Skill.SkillRuntime.HookEmitter do
   @moduledoc """
   Emits optional pre/post skill lifecycle signals.
 

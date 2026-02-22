@@ -73,8 +73,8 @@ iex -S mix
 From IEx, verify children are alive:
 
 ```elixir
-alias JidoSkill.SkillRuntime.{SkillRegistry, SignalDispatcher}
-alias JidoSkill.Observability.SkillLifecycleSubscriber
+alias Jido.Code.Skill.SkillRuntime.{SkillRegistry, SignalDispatcher}
+alias Jido.Code.Skill.Observability.SkillLifecycleSubscriber
 
 Process.alive?(Process.whereis(SkillRegistry))
 Process.alive?(Process.whereis(SignalDispatcher))
@@ -84,14 +84,14 @@ Process.alive?(Process.whereis(SkillLifecycleSubscriber))
 ## 5) Validate Discovery and Routes
 
 ```elixir
-JidoSkill.SkillRuntime.SkillRegistry.list_skills()
-JidoSkill.SkillRuntime.SignalDispatcher.routes()
+Jido.Code.Skill.SkillRuntime.SkillRegistry.list_skills()
+Jido.Code.Skill.SkillRuntime.SignalDispatcher.routes()
 ```
 
 If these are empty, add a skill file under `.jido_code/skills/.../SKILL.md` and run:
 
 ```elixir
-JidoSkill.SkillRuntime.SkillRegistry.reload()
+Jido.Code.Skill.SkillRuntime.SkillRegistry.reload()
 ```
 
 ## Next Step

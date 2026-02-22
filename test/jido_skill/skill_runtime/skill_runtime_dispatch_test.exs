@@ -1,15 +1,15 @@
-defmodule JidoSkill.RuntimeDispatchActions.ExtractText do
+defmodule Jido.Code.Skill.RuntimeDispatchActions.ExtractText do
 end
 
-defmodule JidoSkill.RuntimeDispatchActions.ExtractTables do
+defmodule Jido.Code.Skill.RuntimeDispatchActions.ExtractTables do
 end
 
-defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
+defmodule Jido.Code.Skill.SkillRuntime.SkillRuntimeDispatchTest do
   use ExUnit.Case, async: false
 
+  alias Jido.Code.Skill.SkillRuntime.Skill
   alias Jido.Signal
   alias Jido.Signal.Bus
-  alias JidoSkill.SkillRuntime.Skill
 
   test "handle_signal returns an instruction and emits pre hook for matching routes" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
@@ -26,7 +26,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
           router:
             - "pdf/extract/text": ExtractText
           hooks:
@@ -43,7 +43,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
     {:ok, signal} = Signal.new("pdf.extract.text", %{"file" => "report.pdf"}, source: "/tests")
 
     assert {:ok, instruction} = module.handle_signal(signal, global_hooks: %{})
-    assert instruction.action == JidoSkill.RuntimeDispatchActions.ExtractText
+    assert instruction.action == Jido.Code.Skill.RuntimeDispatchActions.ExtractText
     assert instruction.params == %{"file" => "report.pdf"}
     assert instruction.context["jido_skill_route"] == "pdf/extract/text"
 
@@ -69,7 +69,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
           router:
             - "pdf/extract/text": ExtractText
           hooks:
@@ -102,8 +102,8 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
-            - JidoSkill.RuntimeDispatchActions.ExtractTables
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractTables
           router:
             - "pdf/extract/text": ExtractText
             - "pdf/extract/tables": ExtractTables
@@ -121,7 +121,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
 
     instruction =
       Jido.Instruction.new!(
-        action: JidoSkill.RuntimeDispatchActions.ExtractTables,
+        action: Jido.Code.Skill.RuntimeDispatchActions.ExtractTables,
         params: %{"file" => "report.pdf"}
       )
 
@@ -150,7 +150,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
           router:
             - "pdf/extract/text": ExtractText
             - "pdf/extract/raw_text": ExtractText
@@ -190,7 +190,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
           router:
             - "pdf/extract/text": ExtractText
         """
@@ -231,7 +231,7 @@ defmodule JidoSkill.SkillRuntime.SkillRuntimeDispatchTest do
         version: 1.0.0
         jido:
           actions:
-            - JidoSkill.RuntimeDispatchActions.ExtractText
+            - Jido.Code.Skill.RuntimeDispatchActions.ExtractText
           router:
             - "pdf/extract/text": ExtractText
           hooks:
