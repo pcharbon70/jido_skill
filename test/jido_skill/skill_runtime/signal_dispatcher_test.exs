@@ -1907,6 +1907,96 @@ defmodule JidoSkill.SkillRuntime.SignalDispatcherTest do
     assert recovered_state.hook_defaults == cached_hook_defaults
   end
 
+  test "starts with empty routes when initial list_skills call keeps raising call exceptions across refreshes and recovers on refresh" do
+    set_notify_pid!()
+
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    cached_hook_defaults = hook_defaults(bus_name)
+
+    registry =
+      start_supervised!(
+        {SignalDispatcherTestRegistry,
+         [
+           skills: [hook_aware_dispatcher_skill_entry()],
+           hook_defaults: cached_hook_defaults
+         ]}
+      )
+
+    lookup_plan =
+      start_supervised!(
+        {Agent, fn ->
+          %{count: 0, fail_on: MapSet.new([1, 3, 4])}
+        end}
+      )
+
+    exception_registry =
+      {:via, JidoSkill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+
+    dispatcher =
+      start_supervised!(
+        {SignalDispatcher, [name: nil, bus_name: bus_name, registry: exception_registry]}
+      )
+
+    assert Process.alive?(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+    assert :sys.get_state(dispatcher).hook_defaults == cached_hook_defaults
+
+    subscribe!(bus_name, "skill.pre")
+    subscribe!(bus_name, "skill.post")
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "before_repeated_list_skills_call_exception_recovery"
+             )
+
+    refute_receive {:action_ran, "before_repeated_list_skills_call_exception_recovery"}, 200
+    refute_receive {:signal, _hook_signal_before_repeated_list_skills_call_exception_recovery}, 200
+
+    assert {:error, {:list_skills_failed, _reason}} = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == []
+
+    assert :ok = publish_registry_update_signal(bus_name)
+
+    assert_eventually(fn ->
+      SignalDispatcher.routes(dispatcher) == []
+    end)
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "after_repeated_list_skills_call_exception_refresh"
+             )
+
+    refute_receive {:action_ran, "after_repeated_list_skills_call_exception_refresh"}, 200
+    refute_receive {:signal, _hook_signal_after_repeated_list_skills_call_exception_refresh}, 200
+
+    assert :ok = SignalDispatcher.refresh(dispatcher)
+    assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
+
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "after_repeated_list_skills_call_exception_recovery"
+             )
+
+    assert_receive {:action_ran, "after_repeated_list_skills_call_exception_recovery"}, 1_000
+    assert_receive {:signal, pre_signal}, 1_000
+    assert pre_signal.type == "skill.pre"
+    assert pre_signal.data["route"] == "demo/hook_one"
+    assert_receive {:signal, post_signal}, 1_000
+    assert post_signal.type == "skill.post"
+    assert post_signal.data["route"] == "demo/hook_one"
+
+    recovered_state = :sys.get_state(dispatcher)
+    assert recovered_state.hook_defaults == cached_hook_defaults
+  end
+
   test "starts with empty routes when initial registry reference raises call exceptions and recovers on refresh" do
     set_notify_pid!()
 
