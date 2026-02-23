@@ -35,6 +35,13 @@ List discovered skills:
 mix skill.list --scope local
 ```
 
+Reload skills and settings from disk:
+
+```bash
+./jido --skill reload
+mix skill.reload
+```
+
 ## Guides
 
 - User guides: `docs/user/`

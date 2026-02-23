@@ -41,6 +41,13 @@ mix skill.list --scope all
 ./jido --skill list --scope local
 ```
 
+Reload skills and runtime settings:
+
+```bash
+mix skill.reload
+./jido --skill reload --no-start-app
+```
+
 ## Runtime Health Checks
 
 From IEx:
