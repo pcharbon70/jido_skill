@@ -94,6 +94,21 @@ If these are empty, add a skill file under `.jido_code/skills/.../SKILL.md` and 
 Jido.Code.Skill.SkillRuntime.SkillRegistry.reload()
 ```
 
+## 6) Invoke a Skill from Terminal
+
+Run by mix task:
+
+```bash
+mix skill.run <skill-name> --route <route/path> --data '{"value":"hello"}'
+```
+
+Build and run through the `jido` CLI:
+
+```bash
+mix escript.build
+./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
+```
+
 ## Next Step
 
 Use `docs/user/authoring-skills.md` to create your first valid `SKILL.md`.
