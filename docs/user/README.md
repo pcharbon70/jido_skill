@@ -5,6 +5,7 @@ This directory contains user-facing guides for running and operating the current
 ## Guide Index
 
 - `docs/user/getting-started.md`: install, configure, and boot the runtime.
+- `docs/user/cli-commands-and-options.md`: complete `skill` and `mix skill.*` command/option reference.
 - `docs/user/configuration.md`: `settings.json` structure, precedence, hooks, and permissions.
 - `docs/user/authoring-skills.md`: write valid `SKILL.md` files and map routes to actions.
 - `docs/user/runtime-signals-and-telemetry.md`: signal contracts, routing normalization, and telemetry.
