@@ -3,8 +3,8 @@
 ## Skill CLI Reload Command Support
 
 - [x] Added `mix skill.reload` terminal task to reload `SkillRegistry` from disk and print JSON summary output.
-- [x] Added `jido --skill reload [options]` CLI routing for terminal reload operations.
-- [x] Explicit `jido --skill run <skill_name> ...` remains available for skill names that collide with subcommands (for example, `reload`).
+- [x] Added `skill reload [options]` CLI routing for terminal reload operations.
+- [x] Explicit `skill run <skill_name> ...` remains available for skill names that collide with subcommands (for example, `reload`).
 
 ## Validation
 

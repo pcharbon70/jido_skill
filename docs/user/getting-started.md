@@ -102,45 +102,45 @@ Run by mix task:
 mix skill.run <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
-Build and run through the `jido` CLI:
+Build and run through the `skill` CLI:
 
 ```bash
 mix escript.build
-./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
+./skill <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
 List discovered skills:
 
 ```bash
-./jido --skill list
+./skill list
 mix skill.list
 ```
 
 Reload skills/settings after changing `SKILL.md` or `settings.json`:
 
 ```bash
-./jido --skill reload
+./skill reload
 mix skill.reload
 ```
 
 Inspect active dispatcher routes:
 
 ```bash
-./jido --skill routes
+./skill routes
 mix skill.routes --reload
 ```
 
 Watch skill lifecycle signals from terminal:
 
 ```bash
-./jido --skill watch --limit 20
+./skill watch --limit 20
 mix skill.watch --pattern skill.pre --pattern skill.post
 ```
 
 Publish a skill signal from terminal:
 
 ```bash
-./jido --skill signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
+./skill signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
 mix skill.signal custom.health.check --data '{"status":"ok"}'
 ```
 

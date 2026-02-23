@@ -36,7 +36,7 @@ defmodule Jido.Code.Skill.MixProject do
   defp escript do
     [
       main_module: Jido.Code.Skill.CLI,
-      name: "jido",
+      name: "skill",
       app: nil
     ]
   end

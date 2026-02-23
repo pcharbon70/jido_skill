@@ -28,45 +28,45 @@ Run a skill route from terminal:
 mix skill.run <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
-or with the `jido` escript:
+or with the `skill` escript:
 
 ```bash
-./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
+./skill <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
 List discovered skills from terminal:
 
 ```bash
 mix skill.list --scope all
-./jido --skill list --scope local
+./skill list --scope local
 ```
 
 Reload skills and runtime settings:
 
 ```bash
 mix skill.reload
-./jido --skill reload --no-start-app
+./skill reload --no-start-app
 ```
 
 Inspect active dispatcher routes from terminal:
 
 ```bash
 mix skill.routes --reload
-./jido --skill routes
+./skill routes
 ```
 
 Watch lifecycle/permission/registry signals from terminal:
 
 ```bash
 mix skill.watch --limit 50
-./jido --skill watch --pattern skill.registry.updated --timeout 30000
+./skill watch --pattern skill.registry.updated --timeout 30000
 ```
 
 Publish manual signals for runtime checks:
 
 ```bash
 mix skill.signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
-./jido --skill signal custom.health.check --data '{"status":"ok"}'
+./skill signal custom.health.check --data '{"status":"ok"}'
 ```
 
 ## Runtime Health Checks

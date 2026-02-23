@@ -4,8 +4,8 @@
 
 - [x] Added `mix skill.signal` terminal task to publish arbitrary skill signal types with JSON payloads.
 - [x] `mix skill.signal` supports `--data`, `--source`, `--bus`, and `--registry` runtime overrides for terminal usage.
-- [x] Added `jido --skill signal <signal_type> [options]` CLI routing for terminal signal publishing.
-- [x] Explicit `jido --skill run <skill_name> ...` remains available for skill names that collide with subcommands (for example, `signal`).
+- [x] Added `skill signal <signal_type> [options]` CLI routing for terminal signal publishing.
+- [x] Explicit `skill run <skill_name> ...` remains available for skill names that collide with subcommands (for example, `signal`).
 
 ## Validation
 
