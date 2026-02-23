@@ -123,6 +123,13 @@ Reload skills/settings after changing `SKILL.md` or `settings.json`:
 mix skill.reload
 ```
 
+Inspect active dispatcher routes:
+
+```bash
+./jido --skill routes
+mix skill.routes --reload
+```
+
 Watch skill lifecycle signals from terminal:
 
 ```bash

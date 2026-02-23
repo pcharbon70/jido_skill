@@ -42,6 +42,13 @@ Reload skills and settings from disk:
 mix skill.reload
 ```
 
+Inspect active dispatcher routes:
+
+```bash
+./jido --skill routes
+mix skill.routes --reload
+```
+
 Watch skill lifecycle and registry signals:
 
 ```bash

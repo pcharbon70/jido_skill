@@ -48,6 +48,13 @@ mix skill.reload
 ./jido --skill reload --no-start-app
 ```
 
+Inspect active dispatcher routes from terminal:
+
+```bash
+mix skill.routes --reload
+./jido --skill routes
+```
+
 Watch lifecycle/permission/registry signals from terminal:
 
 ```bash

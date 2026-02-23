@@ -41,6 +41,14 @@ defmodule Jido.Code.Skill.CLITest do
              CLI.resolve(["--skill", "skill", "reload", "--no-start-app"])
   end
 
+  test "routes routes subcommand" do
+    assert {:ok, "skill.routes", ["--reload"]} =
+             CLI.resolve(["--skill", "routes", "--reload"])
+
+    assert {:ok, "skill.routes", ["--dispatcher", "my_dispatcher"]} =
+             CLI.resolve(["--skill", "skill", "routes", "--dispatcher", "my_dispatcher"])
+  end
+
   test "routes watch subcommand" do
     assert {:ok, "skill.watch", ["--pattern", "skill.pre"]} =
              CLI.resolve(["--skill", "watch", "--pattern", "skill.pre"])
@@ -65,6 +73,11 @@ defmodule Jido.Code.Skill.CLITest do
   test "supports running a skill literally named reload using explicit run subcommand" do
     assert {:ok, "skill.run", ["reload", "--route", "demo/route"]} =
              CLI.resolve(["--skill", "run", "reload", "--route", "demo/route"])
+  end
+
+  test "supports running a skill literally named routes using explicit run subcommand" do
+    assert {:ok, "skill.run", ["routes", "--route", "demo/route"]} =
+             CLI.resolve(["--skill", "run", "routes", "--route", "demo/route"])
   end
 
   test "supports running a skill literally named watch using explicit run subcommand" do
