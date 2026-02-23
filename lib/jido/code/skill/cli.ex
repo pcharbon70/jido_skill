@@ -2,7 +2,7 @@ defmodule Jido.Code.Skill.CLI do
   @moduledoc """
   Command-line entrypoint for skill operations.
 
-  This module powers the `jido` escript so skill commands can be executed
+  This module powers the `skill` escript so skill commands can be executed
   without prefixing every invocation with `mix`.
   """
 
@@ -10,20 +10,21 @@ defmodule Jido.Code.Skill.CLI do
 
   @usage """
   Usage:
-    jido --skill <skill_name> [options]
-    jido --skill run <skill_name> [options]
-    jido --skill list [options]
-    jido --skill reload [options]
-    jido --skill watch [options]
-    jido --skill signal <signal_type> [options]
+    skill <skill_name> [options]
+    skill run <skill_name> [options]
+    skill list [options]
+    skill reload [options]
+    skill routes [options]
+    skill watch [options]
+    skill signal <signal_type> [options]
 
   Notes:
-  - `--skill` must be the first argument for skill CLI commands.
-  - `jido --skill <skill_name> ...` is shorthand for `jido --skill run <skill_name> ...`.
-  - To run a skill literally named `list`, use `jido --skill run list ...`.
-  - To run a skill literally named `reload`, use `jido --skill run reload ...`.
-  - To run a skill literally named `watch`, use `jido --skill run watch ...`.
-  - To run a skill literally named `signal`, use `jido --skill run signal ...`.
+  - `skill <skill_name> ...` is shorthand for `skill run <skill_name> ...`.
+  - To run a skill literally named `list`, use `skill run list ...`.
+  - To run a skill literally named `reload`, use `skill run reload ...`.
+  - To run a skill literally named `routes`, use `skill run routes ...`.
+  - To run a skill literally named `watch`, use `skill run watch ...`.
+  - To run a skill literally named `signal`, use `skill run signal ...`.
   """
 
   @spec main([String.t()]) :: :ok | no_return()
@@ -45,7 +46,8 @@ defmodule Jido.Code.Skill.CLI do
   def resolve([value]) when value in ["help", "--help", "-h"], do: {:error, :help}
   def resolve([value | _rest]) when value in ["help", "--help", "-h"], do: {:error, :help}
   def resolve(["--skill" | rest]), do: resolve_skill(rest)
-  def resolve(_args), do: {:error, :skill_prefix_required}
+  def resolve(["skill" | rest]), do: resolve_skill(rest)
+  def resolve(args), do: resolve_skill(args)
 
   defp resolve_skill([]), do: {:error, :missing_command}
   defp resolve_skill([value]) when value in ["help", "--help", "-h"], do: {:error, :help}
@@ -53,6 +55,7 @@ defmodule Jido.Code.Skill.CLI do
   defp resolve_skill(["skill" | rest]), do: resolve_skill(rest)
   defp resolve_skill(["list" | rest]), do: resolve_list(rest)
   defp resolve_skill(["reload" | rest]), do: resolve_reload(rest)
+  defp resolve_skill(["routes" | rest]), do: resolve_routes(rest)
   defp resolve_skill(["watch" | rest]), do: resolve_watch(rest)
   defp resolve_skill(["signal" | rest]), do: resolve_signal(rest)
   defp resolve_skill(["run" | rest]), do: resolve_run(rest)
@@ -60,6 +63,7 @@ defmodule Jido.Code.Skill.CLI do
 
   defp resolve_list(args), do: {:ok, "skill.list", args}
   defp resolve_reload(args), do: {:ok, "skill.reload", args}
+  defp resolve_routes(args), do: {:ok, "skill.routes", args}
   defp resolve_watch(args), do: {:ok, "skill.watch", args}
   defp resolve_signal(args), do: {:ok, "skill.signal", args}
 
