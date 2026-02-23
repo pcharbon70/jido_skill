@@ -55,6 +55,13 @@ mix skill.watch --limit 50
 ./jido --skill watch --pattern skill.registry.updated --timeout 30000
 ```
 
+Publish manual signals for runtime checks:
+
+```bash
+mix skill.signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
+./jido --skill signal custom.health.check --data '{"status":"ok"}'
+```
+
 ## Runtime Health Checks
 
 From IEx:

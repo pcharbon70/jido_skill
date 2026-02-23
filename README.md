@@ -49,6 +49,13 @@ Watch skill lifecycle and registry signals:
 mix skill.watch --pattern skill.pre --pattern skill.post
 ```
 
+Publish a skill signal manually:
+
+```bash
+./jido --skill signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
+mix skill.signal custom.health.check --data '{"status":"ok"}'
+```
+
 ## Guides
 
 - User guides: `docs/user/`
