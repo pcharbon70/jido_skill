@@ -33,9 +33,22 @@ defmodule Jido.Code.Skill.CLITest do
              CLI.resolve(["--skill", "skill", "list", "--permission-status", "ask"])
   end
 
+  test "routes reload subcommand" do
+    assert {:ok, "skill.reload", ["--registry", "my_registry"]} =
+             CLI.resolve(["--skill", "reload", "--registry", "my_registry"])
+
+    assert {:ok, "skill.reload", ["--no-start-app"]} =
+             CLI.resolve(["--skill", "skill", "reload", "--no-start-app"])
+  end
+
   test "supports running a skill literally named list using explicit run subcommand" do
     assert {:ok, "skill.run", ["list", "--route", "demo/route"]} =
              CLI.resolve(["--skill", "run", "list", "--route", "demo/route"])
+  end
+
+  test "supports running a skill literally named reload using explicit run subcommand" do
+    assert {:ok, "skill.run", ["reload", "--route", "demo/route"]} =
+             CLI.resolve(["--skill", "run", "reload", "--route", "demo/route"])
   end
 
   test "rejects missing and invalid skill invocations" do

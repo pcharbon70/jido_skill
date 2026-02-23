@@ -116,6 +116,13 @@ List discovered skills:
 mix skill.list
 ```
 
+Reload skills/settings after changing `SKILL.md` or `settings.json`:
+
+```bash
+./jido --skill reload
+mix skill.reload
+```
+
 ## Next Step
 
 Use `docs/user/authoring-skills.md` to create your first valid `SKILL.md`.
