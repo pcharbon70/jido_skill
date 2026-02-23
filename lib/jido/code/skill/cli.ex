@@ -14,12 +14,14 @@ defmodule Jido.Code.Skill.CLI do
     jido --skill run <skill_name> [options]
     jido --skill list [options]
     jido --skill reload [options]
+    jido --skill watch [options]
 
   Notes:
   - `--skill` must be the first argument for skill CLI commands.
   - `jido --skill <skill_name> ...` is shorthand for `jido --skill run <skill_name> ...`.
   - To run a skill literally named `list`, use `jido --skill run list ...`.
   - To run a skill literally named `reload`, use `jido --skill run reload ...`.
+  - To run a skill literally named `watch`, use `jido --skill run watch ...`.
   """
 
   @spec main([String.t()]) :: :ok | no_return()
@@ -49,11 +51,13 @@ defmodule Jido.Code.Skill.CLI do
   defp resolve_skill(["skill" | rest]), do: resolve_skill(rest)
   defp resolve_skill(["list" | rest]), do: resolve_list(rest)
   defp resolve_skill(["reload" | rest]), do: resolve_reload(rest)
+  defp resolve_skill(["watch" | rest]), do: resolve_watch(rest)
   defp resolve_skill(["run" | rest]), do: resolve_run(rest)
   defp resolve_skill([skill_name | rest]), do: resolve_run([skill_name | rest])
 
   defp resolve_list(args), do: {:ok, "skill.list", args}
   defp resolve_reload(args), do: {:ok, "skill.reload", args}
+  defp resolve_watch(args), do: {:ok, "skill.watch", args}
 
   defp resolve_run([skill_name | rest]) when is_binary(skill_name) do
     normalized = String.trim(skill_name)

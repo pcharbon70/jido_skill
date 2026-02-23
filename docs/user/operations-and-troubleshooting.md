@@ -48,6 +48,13 @@ mix skill.reload
 ./jido --skill reload --no-start-app
 ```
 
+Watch lifecycle/permission/registry signals from terminal:
+
+```bash
+mix skill.watch --limit 50
+./jido --skill watch --pattern skill.registry.updated --timeout 30000
+```
+
 ## Runtime Health Checks
 
 From IEx:

@@ -123,6 +123,13 @@ Reload skills/settings after changing `SKILL.md` or `settings.json`:
 mix skill.reload
 ```
 
+Watch skill lifecycle signals from terminal:
+
+```bash
+./jido --skill watch --limit 20
+mix skill.watch --pattern skill.pre --pattern skill.post
+```
+
 ## Next Step
 
 Use `docs/user/authoring-skills.md` to create your first valid `SKILL.md`.

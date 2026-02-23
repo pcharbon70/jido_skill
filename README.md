@@ -42,6 +42,13 @@ Reload skills and settings from disk:
 mix skill.reload
 ```
 
+Watch skill lifecycle and registry signals:
+
+```bash
+./jido --skill watch --limit 20
+mix skill.watch --pattern skill.pre --pattern skill.post
+```
+
 ## Guides
 
 - User guides: `docs/user/`
