@@ -22,6 +22,18 @@ Inspect active routes:
 Jido.Code.Skill.SkillRuntime.SignalDispatcher.routes()
 ```
 
+Run a skill route from terminal:
+
+```bash
+mix skill.run <skill-name> --route <route/path> --data '{"value":"hello"}'
+```
+
+or with the `jido` escript:
+
+```bash
+./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
+```
+
 ## Runtime Health Checks
 
 From IEx:

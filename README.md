@@ -1,21 +1,35 @@
 # Jido.Code.Skill
 
-**TODO: Add description**
+Skill-only runtime for Jido-based markdown skills with signal-first dispatch.
 
-## Installation
+## Terminal Commands
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `jido_skill` to your list of dependencies in `mix.exs`:
+Build the local `jido` escript:
 
-```elixir
-def deps do
-  [
-    {:jido_skill, "~> 0.1.0"}
-  ]
-end
+```bash
+mix escript.build
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/jido_skill>.
+Invoke a skill from terminal:
 
+```bash
+./jido --skill pdf-processor --route pdf/extract/text --data '{"file":"report.pdf"}'
+```
+
+Equivalent explicit form:
+
+```bash
+./jido --skill run pdf-processor --route pdf/extract/text --data '{"file":"report.pdf"}'
+```
+
+Mix task equivalent:
+
+```bash
+mix skill.run pdf-processor --route pdf/extract/text --data '{"file":"report.pdf"}'
+```
+
+## Guides
+
+- User guides: `docs/user/`
+- Developer guides: `docs/developer/`
+- Acceptance contracts by phase: `docs/contracts/`

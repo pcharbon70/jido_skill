@@ -8,7 +8,7 @@ This directory contains user-facing guides for running and operating the current
 - `docs/user/configuration.md`: `settings.json` structure, precedence, hooks, and permissions.
 - `docs/user/authoring-skills.md`: write valid `SKILL.md` files and map routes to actions.
 - `docs/user/runtime-signals-and-telemetry.md`: signal contracts, routing normalization, and telemetry.
-- `docs/user/operations-and-troubleshooting.md`: reload workflows, runtime checks, and common failure modes.
+- `docs/user/operations-and-troubleshooting.md`: reload workflows, run terminal commands, runtime checks, and common failure modes.
 
 ## Scope
 

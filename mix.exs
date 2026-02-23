@@ -7,8 +7,10 @@ defmodule Jido.Code.Skill.MixProject do
       version: "0.1.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      escript: escript(),
       dialyzer: [
-        flags: [:error_handling, :underspecs, :unknown, :unmatched_returns]
+        flags: [:error_handling, :underspecs, :unknown, :unmatched_returns],
+        plt_add_apps: [:mix]
       ],
       deps: deps()
     ]
@@ -28,6 +30,14 @@ defmodule Jido.Code.Skill.MixProject do
       {:jido, git: "https://github.com/agentjido/jido"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false}
+    ]
+  end
+
+  defp escript do
+    [
+      main_module: Jido.Code.Skill.CLI,
+      name: "jido",
+      app: nil
     ]
   end
 end
