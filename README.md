@@ -28,6 +28,13 @@ Mix task equivalent:
 mix skill.run pdf-processor --route pdf/extract/text --data '{"file":"report.pdf"}'
 ```
 
+List discovered skills:
+
+```bash
+./jido --skill list
+mix skill.list --scope local
+```
+
 ## Guides
 
 - User guides: `docs/user/`

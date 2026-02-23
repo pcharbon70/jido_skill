@@ -96,6 +96,7 @@ defmodule Jido.Code.Skill.Observability.LifecycleSubscriberTestRegistry do
 
   def set_hook_defaults_error(server, value),
     do: GenServer.call(server, {:set_hook_defaults_error, value})
+
   def set_list_skills_error(server, value),
     do: GenServer.call(server, {:set_list_skills_error, value})
 
@@ -816,7 +817,8 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert initial_state.bus_name == old_bus_name
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
+      :ok =
+        publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -978,7 +980,13 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert Map.has_key?(initial_state.subscriptions, "skill.pre")
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "startup-fallback-old-bus")
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "startup-fallback-old-bus"
+        )
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1091,7 +1099,8 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert initial_state.bus_name == old_bus_name
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
+      :ok =
+        publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-reload")
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1181,7 +1190,8 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert initial_state.bus_name == old_bus_name
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-refresh")
+      :ok =
+        publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-refresh")
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1205,7 +1215,8 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     end)
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-invalid")
+      :ok =
+        publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-invalid")
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1233,7 +1244,13 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     assert_unobserved_over_time(
       fn ->
-        :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-recovery-old-bus")
+        :ok =
+          publish_lifecycle_signal(
+            old_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-recovery-old-bus"
+          )
       end,
       6,
       80
@@ -1593,13 +1610,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([3])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([3])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -1708,13 +1727,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([3, 6, 9])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([3, 6, 9])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -1886,7 +1907,8 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert initial_state.bus_name == old_bus_name
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-raise")
+      :ok =
+        publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-raise")
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1918,7 +1940,13 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     end)
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "after-raise-old-bus")
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-raise-old-bus"
+        )
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -1934,7 +1962,13 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     assert_unobserved_over_time(
       fn ->
-        :ok = publish_lifecycle_signal(reloaded_bus_name, "skill.pre", "/hooks/skill/pre", "after-raise-new-bus")
+        :ok =
+          publish_lifecycle_signal(
+            reloaded_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-raise-new-bus"
+          )
       end,
       6,
       80
@@ -1960,13 +1994,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([6])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([6])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -1989,7 +2025,13 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert initial_state.bus_name == old_bus_name
 
     assert_eventually(fn ->
-      :ok = publish_lifecycle_signal(old_bus_name, "skill.pre", "/hooks/skill/pre", "before-call-exception-refresh")
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "before-call-exception-refresh"
+        )
 
       receive do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
@@ -2100,13 +2142,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([6, 9])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([6, 9])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -2912,19 +2956,27 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: recovered_hook_defaults
          ]}
       )
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -2999,20 +3051,27 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: recovered_hook_defaults
          ]}
       )
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 4, 6])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 4, 6])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -3123,7 +3182,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: recovered_hook_defaults,
            list_skills_error: {:invalid_return, :skills_unavailable}
          ]}
@@ -3271,7 +3335,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: recovered_hook_defaults
          ]}
       )
@@ -3315,7 +3384,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: %{
              pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
              post: %{enabled: true, signal_type: "skill/post"}
@@ -3392,7 +3466,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
            [
              [
                name: registry_name,
-               skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+               skills: [
+                 %{
+                   module:
+                     Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+                 }
+               ],
                hook_defaults: %{
                  pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
                  post: %{enabled: true, signal_type: "skill/post"}
@@ -3437,7 +3516,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
         {LifecycleSubscriberTestRegistry,
          [
            name: registry_name,
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: %{
              pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
              post: %{enabled: true, signal_type: "skill/post"}
@@ -3483,19 +3567,27 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: recovered_hook_defaults
          ]}
       )
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([1])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([1])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     subscriber =
       start_supervised!(
@@ -3866,7 +3958,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: cached_hook_defaults
          ]}
       )
@@ -3951,7 +4048,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: cached_hook_defaults
          ]}
       )
@@ -3996,13 +4098,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 4])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 4])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     :sys.replace_state(subscriber, fn state ->
       %{state | registry: exception_registry}
@@ -4172,7 +4276,12 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
       start_supervised!(
         {LifecycleSubscriberTestRegistry,
          [
-           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           skills: [
+             %{
+               module:
+                 Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook
+             }
+           ],
            hook_defaults: cached_hook_defaults
          ]}
       )
@@ -4217,13 +4326,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([1, 3])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([1, 3])}
+         end}
       )
 
     exception_registry =
-      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia, {registry, lookup_plan}}
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
 
     :sys.replace_state(subscriber, fn state ->
       %{state | registry: exception_registry}
@@ -4656,7 +4767,9 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     pre_signal_type = Keyword.get(opts, :pre_signal_type)
     pre_enabled = Keyword.fetch(opts, :pre_enabled)
     allowed_tools = Keyword.get(opts, :allowed_tools)
-    allowed_tools_line = if is_nil(allowed_tools), do: "", else: "allowed-tools: #{allowed_tools}\n"
+
+    allowed_tools_line =
+      if is_nil(allowed_tools), do: "", else: "allowed-tools: #{allowed_tools}\n"
 
     hooks_block =
       case {pre_signal_type, pre_enabled} do

@@ -136,8 +136,11 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTestRegistry do
   def set_bus_name_error(server, value),
     do: GenServer.call(server, {:set_bus_name_error, value})
 
-  def set_hook_defaults_error(server, value), do: GenServer.call(server, {:set_hook_defaults_error, value})
-  def set_list_skills_error(server, value), do: GenServer.call(server, {:set_list_skills_error, value})
+  def set_hook_defaults_error(server, value),
+    do: GenServer.call(server, {:set_hook_defaults_error, value})
+
+  def set_list_skills_error(server, value),
+    do: GenServer.call(server, {:set_list_skills_error, value})
 
   @impl GenServer
   def init(state), do: {:ok, state}
@@ -491,11 +494,15 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "before_reload"}, 1_000
     refute_receive {:signal, _blocked_before_reload}, 200
 
-    write_settings(local_settings_path, %{
-      "allow" => [],
-      "deny" => [],
-      "ask" => ["Bash(git:*)"]
-    }, signal_bus_name: bus_name)
+    write_settings(
+      local_settings_path,
+      %{
+        "allow" => [],
+        "deny" => [],
+        "ask" => ["Bash(git:*)"]
+      },
+      signal_bus_name: bus_name
+    )
 
     assert :ok = SkillRegistry.reload(registry)
 
@@ -1056,7 +1063,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
     assert :sys.get_state(dispatcher).bus_name == old_bus_name
 
-    assert :ok = publish_dispatch_signal(old_bus_name, "demo.rollback", "before_bus_name_recovery")
+    assert :ok =
+             publish_dispatch_signal(old_bus_name, "demo.rollback", "before_bus_name_recovery")
+
     assert_receive {:action_ran, "before_bus_name_recovery"}, 1_000
 
     assert :ok = SignalDispatcherTestRegistry.set_bus_name_error(registry, nil)
@@ -1308,7 +1317,13 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "before_bus_name_raise"}, 1_000
 
     assert :ok = SignalDispatcherTestRegistry.set_bus_name(registry, reloaded_bus_name)
-    assert :ok = SignalDispatcherTestRegistry.set_bus_name_error(registry, {:raise, RuntimeError.exception("bus_name_failed")})
+
+    assert :ok =
+             SignalDispatcherTestRegistry.set_bus_name_error(
+               registry,
+               {:raise, RuntimeError.exception("bus_name_failed")}
+             )
+
     assert :ok = publish_registry_update_signal(old_bus_name)
 
     assert_eventually(fn ->
@@ -1357,9 +1372,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2])}
+         end}
       )
 
     exception_registry =
@@ -1431,9 +1447,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 5, 8])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 5, 8])}
+         end}
       )
 
     exception_registry =
@@ -1530,9 +1547,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([5])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([5])}
+         end}
       )
 
     exception_registry =
@@ -1547,7 +1565,13 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
     assert :sys.get_state(dispatcher).bus_name == old_bus_name
 
-    assert :ok = publish_dispatch_signal(old_bus_name, "demo.rollback", "before_bus_name_call_exception_refresh")
+    assert :ok =
+             publish_dispatch_signal(
+               old_bus_name,
+               "demo.rollback",
+               "before_bus_name_call_exception_refresh"
+             )
+
     assert_receive {:action_ran, "before_bus_name_call_exception_refresh"}, 1_000
 
     assert :ok = SignalDispatcherTestRegistry.set_bus_name(registry, reloaded_bus_name)
@@ -1596,9 +1620,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([5, 8])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([5, 8])}
+         end}
       )
 
     exception_registry =
@@ -1720,7 +1745,8 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
       start_supervised!(%{
         id: {:dispatcher_test_registry, System.unique_integer([:positive])},
         start:
-          {SignalDispatcherTestRegistry, :start_link, [[skills: [valid_dispatcher_skill_entry()]]]},
+          {SignalDispatcherTestRegistry, :start_link,
+           [[skills: [valid_dispatcher_skill_entry()]]]},
         restart: :temporary
       })
 
@@ -1872,21 +1898,19 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     start_supervised!({Bus, [name: bus_name, middleware: []]})
 
     _failing_registry =
-      start_supervised!(
-        %{
-          id: {:dispatcher_raise_registry, System.unique_integer([:positive])},
-          start:
-            {SignalDispatcherTestRegistry, :start_link,
+      start_supervised!(%{
+        id: {:dispatcher_raise_registry, System.unique_integer([:positive])},
+        start:
+          {SignalDispatcherTestRegistry, :start_link,
+           [
              [
-               [
-                 name: registry_name,
-                 skills: [valid_dispatcher_skill_entry()],
-                 list_skills_error: {:raise, RuntimeError.exception("skills_unavailable")}
-               ]
-             ]},
-          restart: :temporary
-        }
-      )
+               name: registry_name,
+               skills: [valid_dispatcher_skill_entry()],
+               list_skills_error: {:raise, RuntimeError.exception("skills_unavailable")}
+             ]
+           ]},
+        restart: :temporary
+      })
 
     dispatcher =
       start_supervised!(
@@ -1936,12 +1960,14 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([1])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([1])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -2008,9 +2034,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([1, 3, 4])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([1, 3, 4])}
+         end}
       )
 
     exception_registry =
@@ -2036,7 +2063,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
              )
 
     refute_receive {:action_ran, "before_repeated_list_skills_call_exception_recovery"}, 200
-    refute_receive {:signal, _hook_signal_before_repeated_list_skills_call_exception_recovery}, 200
+
+    refute_receive {:signal, _hook_signal_before_repeated_list_skills_call_exception_recovery},
+                   200
 
     assert {:error, {:list_skills_failed, _reason}} = SignalDispatcher.refresh(dispatcher)
     assert SignalDispatcher.routes(dispatcher) == []
@@ -2293,12 +2322,14 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     dispatcher =
       start_supervised!(
@@ -2352,9 +2383,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 4, 6])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 4, 6])}
+         end}
       )
 
     exception_registry =
@@ -2372,14 +2404,26 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     subscribe!(bus_name, "skill.pre")
     subscribe!(bus_name, "skill.post")
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "before_repeated_startup_hook_failure")
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "before_repeated_startup_hook_failure"
+             )
+
     assert_receive {:action_ran, "before_repeated_startup_hook_failure"}, 1_000
     refute_receive {:signal, _hook_signal_before_repeated_startup_hook_failure}, 200
 
     assert :ok = SignalDispatcher.refresh(dispatcher)
     assert :sys.get_state(dispatcher).hook_defaults == %{}
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_first_repeated_startup_hook_failure")
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "after_first_repeated_startup_hook_failure"
+             )
+
     assert_receive {:action_ran, "after_first_repeated_startup_hook_failure"}, 1_000
     refute_receive {:signal, _hook_signal_after_first_repeated_startup_hook_failure}, 200
 
@@ -2387,13 +2431,25 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     Process.sleep(50)
     assert :sys.get_state(dispatcher).hook_defaults == %{}
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_second_repeated_startup_hook_failure")
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "after_second_repeated_startup_hook_failure"
+             )
+
     assert_receive {:action_ran, "after_second_repeated_startup_hook_failure"}, 1_000
     refute_receive {:signal, _hook_signal_after_second_repeated_startup_hook_failure}, 200
 
     assert :ok = SignalDispatcher.refresh(dispatcher)
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_repeated_startup_hook_recovery")
+    assert :ok =
+             publish_dispatch_signal(
+               bus_name,
+               "demo.hook_one",
+               "after_repeated_startup_hook_recovery"
+             )
+
     assert_receive {:action_ran, "after_repeated_startup_hook_recovery"}, 1_000
     assert_receive {:signal, pre_signal}, 1_000
     assert pre_signal.type == "skill.pre"
@@ -2426,7 +2482,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_recovery")
     refute_receive {:action_ran, "before_recovery"}, 200
 
-    assert :ok = SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry()])
+    assert :ok =
+             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry()])
+
     assert :ok = publish_registry_update_signal(bus_name)
 
     assert_eventually(fn ->
@@ -2485,7 +2543,8 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
       start_supervised!(%{
         id: {:dispatcher_raise_refresh_registry, System.unique_integer([:positive])},
         start:
-          {SignalDispatcherTestRegistry, :start_link, [[skills: [valid_dispatcher_skill_entry()]]]},
+          {SignalDispatcherTestRegistry, :start_link,
+           [[skills: [valid_dispatcher_skill_entry()]]]},
         restart: :temporary
       })
 
@@ -2591,16 +2650,20 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert post_before_refresh.data["route"] == "demo/hook_one"
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [hook_aware_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               hook_aware_dispatcher_skill_entry_two()
+             ])
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([1, 2])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([1, 2])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2620,7 +2683,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert post_after_refresh.type == "skill.post"
     assert post_after_refresh.data["route"] == "demo/hook_one"
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_two", "new_route_should_not_dispatch")
+    assert :ok =
+             publish_dispatch_signal(bus_name, "demo.hook_two", "new_route_should_not_dispatch")
+
     refute_receive {:action_ran, "new_route_should_not_dispatch"}, 200
 
     dispatcher_state = :sys.get_state(dispatcher)
@@ -2632,7 +2697,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert Process.alive?(dispatcher)
     assert SignalDispatcher.routes(dispatcher) == ["demo.hook_one"]
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "after_exception_registry_update")
+    assert :ok =
+             publish_dispatch_signal(bus_name, "demo.hook_one", "after_exception_registry_update")
+
     assert_receive {:action_ran, "after_exception_registry_update"}, 1_000
   end
 
@@ -2661,7 +2728,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "before_hook_failure"}, 1_000
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               valid_dispatcher_skill_entry_two()
+             ])
 
     assert :ok =
              SignalDispatcherTestRegistry.set_hook_defaults_error(
@@ -2707,7 +2776,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert_receive {:action_ran, "before_raise_hook_failure"}, 1_000
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               valid_dispatcher_skill_entry_two()
+             ])
 
     assert :ok =
              SignalDispatcherTestRegistry.set_hook_defaults_error(
@@ -2761,20 +2832,27 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
       start_supervised!({SignalDispatcher, [name: nil, bus_name: bus_name, registry: registry]})
 
     assert SignalDispatcher.routes(dispatcher) == ["demo.rollback"]
-    assert :ok = publish_dispatch_signal(bus_name, "demo.rollback", "before_exception_hook_failure")
+
+    assert :ok =
+             publish_dispatch_signal(bus_name, "demo.rollback", "before_exception_hook_failure")
+
     assert_receive {:action_ran, "before_exception_hook_failure"}, 1_000
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [valid_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               valid_dispatcher_skill_entry_two()
+             ])
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 4])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 4])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2798,7 +2876,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert Process.alive?(dispatcher)
     assert SignalDispatcher.routes(dispatcher) == ["demo.second"]
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.second", "after_exception_registry_update")
+    assert :ok =
+             publish_dispatch_signal(bus_name, "demo.second", "after_exception_registry_update")
+
     assert_receive {:action_ran, "after_exception_registry_update"}, 1_000
   end
 
@@ -2843,16 +2923,20 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert post_before_refresh.data["route"] == "demo/hook_one"
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [hook_aware_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               hook_aware_dispatcher_skill_entry_two()
+             ])
 
     lookup_plan =
       start_supervised!(
-        {Agent, fn ->
-          %{count: 0, fail_on: MapSet.new([2, 4])}
-        end}
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([2, 4])}
+         end}
       )
 
-    exception_registry = {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
+    exception_registry =
+      {:via, Jido.Code.Skill.SkillRuntime.SignalDispatcherNthLookupVia, {registry, lookup_plan}}
 
     :sys.replace_state(dispatcher, fn state ->
       %{state | registry: exception_registry}
@@ -2929,7 +3013,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     subscribe!(bus_name, "skill.pre")
     subscribe!(bus_name, "skill.post")
 
-    assert :ok = publish_dispatch_signal(bus_name, "demo.hook_one", "before_invalid_hook_defaults")
+    assert :ok =
+             publish_dispatch_signal(bus_name, "demo.hook_one", "before_invalid_hook_defaults")
+
     assert_receive {:action_ran, "before_invalid_hook_defaults"}, 1_000
     assert_receive {:signal, pre_signal}, 1_000
     assert pre_signal.type == "skill.pre"
@@ -2939,7 +3025,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcherTest do
     assert post_signal.data["route"] == "demo/hook_one"
 
     assert :ok =
-             SignalDispatcherTestRegistry.set_skills(registry, [hook_aware_dispatcher_skill_entry_two()])
+             SignalDispatcherTestRegistry.set_skills(registry, [
+               hook_aware_dispatcher_skill_entry_two()
+             ])
 
     assert :ok =
              SignalDispatcherTestRegistry.set_hook_defaults_error(

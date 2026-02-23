@@ -109,6 +109,13 @@ mix escript.build
 ./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
+List discovered skills:
+
+```bash
+./jido --skill list
+mix skill.list
+```
+
 ## Next Step
 
 Use `docs/user/authoring-skills.md` to create your first valid `SKILL.md`.

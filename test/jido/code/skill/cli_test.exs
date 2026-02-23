@@ -25,6 +25,19 @@ defmodule Jido.Code.Skill.CLITest do
              ])
   end
 
+  test "routes list subcommand" do
+    assert {:ok, "skill.list", ["--scope", "local"]} =
+             CLI.resolve(["--skill", "list", "--scope", "local"])
+
+    assert {:ok, "skill.list", ["--permission-status", "ask"]} =
+             CLI.resolve(["--skill", "skill", "list", "--permission-status", "ask"])
+  end
+
+  test "supports running a skill literally named list using explicit run subcommand" do
+    assert {:ok, "skill.run", ["list", "--route", "demo/route"]} =
+             CLI.resolve(["--skill", "run", "list", "--route", "demo/route"])
+  end
+
   test "rejects missing and invalid skill invocations" do
     assert {:error, :missing_command} = CLI.resolve([])
     assert {:error, :missing_command} = CLI.resolve(["--skill"])

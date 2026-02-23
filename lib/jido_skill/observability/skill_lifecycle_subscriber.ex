@@ -270,10 +270,15 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriber do
     build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)
   end
 
-  defp target_subscription_paths_for_refresh(configured_hook_signal_types, registry, hook_defaults) do
+  defp target_subscription_paths_for_refresh(
+         configured_hook_signal_types,
+         registry,
+         hook_defaults
+       ) do
     with {:ok, registry_hook_signal_types} <-
            registry_hook_signal_types_for_refresh(registry, hook_defaults) do
-      {:ok, build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)}
+      {:ok,
+       build_target_subscription_paths(configured_hook_signal_types, registry_hook_signal_types)}
     end
   end
 

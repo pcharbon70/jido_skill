@@ -163,7 +163,9 @@ defmodule Jido.Code.Skill.SkillRuntime.SkillRuntimeDispatchTest do
       )
 
     assert {:ok, module} = Skill.from_markdown(path)
-    {:ok, signal} = Signal.new("pdf.extract.raw_text", %{"file" => "report.pdf"}, source: "/tests")
+
+    {:ok, signal} =
+      Signal.new("pdf.extract.raw_text", %{"file" => "report.pdf"}, source: "/tests")
 
     assert {:ok, instruction} = module.handle_signal(signal, global_hooks: %{})
     assert instruction.context["jido_skill_route"] == "pdf/extract/raw_text"
