@@ -676,9 +676,7 @@ defmodule Jido.Code.Skill.SkillRuntime.SignalDispatcher do
   end
 
   defp log_hook_defaults_refresh_error(reason, :error) do
-    Logger.warning(
-      "failed to refresh hook defaults; keeping cached defaults: #{inspect(reason)}"
-    )
+    Logger.warning("failed to refresh hook defaults; keeping cached defaults: #{inspect(reason)}")
   end
 
   defp safe_list_skills(registry, mode) do

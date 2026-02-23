@@ -12,10 +12,12 @@ defmodule Jido.Code.Skill.CLI do
   Usage:
     jido --skill <skill_name> [options]
     jido --skill run <skill_name> [options]
+    jido --skill list [options]
 
   Notes:
   - `--skill` must be the first argument for skill CLI commands.
   - `jido --skill <skill_name> ...` is shorthand for `jido --skill run <skill_name> ...`.
+  - To run a skill literally named `list`, use `jido --skill run list ...`.
   """
 
   @spec main([String.t()]) :: :ok | no_return()
@@ -43,8 +45,11 @@ defmodule Jido.Code.Skill.CLI do
   defp resolve_skill([value]) when value in ["help", "--help", "-h"], do: {:error, :help}
   defp resolve_skill([value | _rest]) when value in ["help", "--help", "-h"], do: {:error, :help}
   defp resolve_skill(["skill" | rest]), do: resolve_skill(rest)
+  defp resolve_skill(["list" | rest]), do: resolve_list(rest)
   defp resolve_skill(["run" | rest]), do: resolve_run(rest)
   defp resolve_skill([skill_name | rest]), do: resolve_run([skill_name | rest])
+
+  defp resolve_list(args), do: {:ok, "skill.list", args}
 
   defp resolve_run([skill_name | rest]) when is_binary(skill_name) do
     normalized = String.trim(skill_name)

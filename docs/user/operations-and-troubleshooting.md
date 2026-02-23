@@ -34,6 +34,13 @@ or with the `jido` escript:
 ./jido --skill <skill-name> --route <route/path> --data '{"value":"hello"}'
 ```
 
+List discovered skills from terminal:
+
+```bash
+mix skill.list --scope all
+./jido --skill list --scope local
+```
+
 ## Runtime Health Checks
 
 From IEx:

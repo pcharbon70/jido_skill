@@ -412,7 +412,10 @@ defmodule Jido.Code.Skill.SkillRuntime.SkillCompilerTest do
   test "allows recompiling explicit skill_module from the same source path" do
     tmp = tmp_dir("skill_module_recompile")
     path = Path.join(tmp, "SKILL.md")
-    module_ref = "Jido.Code.Skill.TestCompiledSkills.Recompile#{System.unique_integer([:positive])}"
+
+    module_ref =
+      "Jido.Code.Skill.TestCompiledSkills.Recompile#{System.unique_integer([:positive])}"
+
     module = module_ref |> String.split(".") |> Module.concat()
 
     File.write!(
