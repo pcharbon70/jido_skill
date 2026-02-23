@@ -130,6 +130,13 @@ Watch skill lifecycle signals from terminal:
 mix skill.watch --pattern skill.pre --pattern skill.post
 ```
 
+Publish a skill signal from terminal:
+
+```bash
+./jido --skill signal skill.pre --data '{"skill_name":"pdf-processor","route":"pdf/extract/text"}'
+mix skill.signal custom.health.check --data '{"status":"ok"}'
+```
+
 ## Next Step
 
 Use `docs/user/authoring-skills.md` to create your first valid `SKILL.md`.

@@ -49,6 +49,14 @@ defmodule Jido.Code.Skill.CLITest do
              CLI.resolve(["--skill", "skill", "watch", "--timeout", "1000"])
   end
 
+  test "routes signal subcommand" do
+    assert {:ok, "skill.signal", ["skill.pre", "--data", ~s({"value":"hello"})]} =
+             CLI.resolve(["--skill", "signal", "skill.pre", "--data", ~s({"value":"hello"})])
+
+    assert {:ok, "skill.signal", ["skill.post"]} =
+             CLI.resolve(["--skill", "skill", "signal", "skill.post"])
+  end
+
   test "supports running a skill literally named list using explicit run subcommand" do
     assert {:ok, "skill.run", ["list", "--route", "demo/route"]} =
              CLI.resolve(["--skill", "run", "list", "--route", "demo/route"])
@@ -62,6 +70,11 @@ defmodule Jido.Code.Skill.CLITest do
   test "supports running a skill literally named watch using explicit run subcommand" do
     assert {:ok, "skill.run", ["watch", "--route", "demo/route"]} =
              CLI.resolve(["--skill", "run", "watch", "--route", "demo/route"])
+  end
+
+  test "supports running a skill literally named signal using explicit run subcommand" do
+    assert {:ok, "skill.run", ["signal", "--route", "demo/route"]} =
+             CLI.resolve(["--skill", "run", "signal", "--route", "demo/route"])
   end
 
   test "rejects missing and invalid skill invocations" do
