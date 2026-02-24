@@ -3289,6 +3289,134 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     assert updated_state.cached_hook_defaults == recovered_hook_defaults
   end
 
+  test "starts without inherited lifecycle subscriptions when initial list_skills call keeps exiting across refreshes and recovers on refresh" do
+    bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"lifecycle_list_skills_exit_registry_#{System.unique_integer([:positive])}"
+
+    recovered_hook_defaults = %{
+      pre: %{enabled: true, signal_type: "skill/default/custom/pre"},
+      post: %{enabled: true, signal_type: "skill/post"}
+    }
+
+    start_supervised!({Bus, [name: bus_name, middleware: []]})
+
+    _registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           name: registry_name,
+           skills: [%{module: Jido.Code.Skill.Observability.TestSkills.InheritGlobalSignalTypeLifecycleHook}],
+           hook_defaults: recovered_hook_defaults,
+           list_skills_error: {:exit, :skills_unavailable}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: bus_name,
+           registry: registry_name,
+           hook_signal_types: [],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    subscriber_state = :sys.get_state(subscriber)
+    assert subscriber_state.cached_hook_defaults == recovered_hook_defaults
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "before-list-skills-exit-repeated-recovery"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+    assert :sys.get_state(subscriber).cached_hook_defaults == recovered_hook_defaults
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "after-first-list-skills-exit-refresh"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+    assert :sys.get_state(subscriber).cached_hook_defaults == recovered_hook_defaults
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            bus_name,
+            "skill.default.custom.pre",
+            "/hooks/skill/default/custom/pre",
+            "after-second-list-skills-exit-refresh"
+          )
+      end,
+      6,
+      60
+    )
+
+    assert_eventually(fn ->
+      try do
+        LifecycleSubscriberTestRegistry.set_list_skills_error(registry_name, nil) == :ok
+      catch
+        :exit, _reason ->
+          false
+      end
+    end)
+
+    assert :ok = publish_registry_update_signal(bus_name)
+    Process.sleep(50)
+    drain_telemetry_messages()
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          bus_name,
+          "skill.default.custom.pre",
+          "/hooks/skill/default/custom/pre",
+          "after-list-skills-exit-repeated-recovery"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.default.custom.pre" and
+            metadata.skill_name == "after-list-skills-exit-repeated-recovery"
+      after
+        80 ->
+          false
+      end
+    end)
+
+    updated_state = :sys.get_state(subscriber)
+    assert updated_state.cached_hook_defaults == recovered_hook_defaults
+  end
+
   test "starts with base subscriptions when initial registry reference raises call exceptions and recovers registry-derived subscriptions" do
     bus_name = "bus_#{System.unique_integer([:positive])}"
 
