@@ -1873,6 +1873,171 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
     end)
   end
 
+  test "keeps configured lifecycle bus when startup bus_name lookup keeps exiting across refreshes and migrates after recovery" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+    registry_name = :"lifecycle_bus_name_exit_registry_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    _registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           name: registry_name,
+           skills: [],
+           hook_defaults: %{},
+           bus_name: reloaded_bus_name,
+           bus_name_error: {:exit, :bus_name_unavailable}
+         ]}
+      )
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: registry_name,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+    assert Map.has_key?(initial_state.subscriptions, "skill.pre")
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "startup-exit-repeated-old-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "startup-exit-repeated-old-bus" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+    assert :ok = publish_registry_update_signal(old_bus_name)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == old_bus_name and
+        state.registry_subscription == initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "startup-exit-repeated-refresh-old-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "startup-exit-repeated-refresh-old-bus" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            reloaded_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "startup-exit-repeated-refresh-new-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      try do
+        LifecycleSubscriberTestRegistry.set_bus_name_error(registry_name, nil) == :ok
+      catch
+        :exit, _reason ->
+          false
+      end
+    end)
+
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == reloaded_bus_name and
+        state.registry_subscription != initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            old_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "startup-exit-recovery-old-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          reloaded_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "startup-exit-recovery-new-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "startup-exit-recovery-new-bus" and
+            metadata.bus == reloaded_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
   test "preserves cached lifecycle bus when bus_name lookup raises during refresh" do
     old_bus_name = "bus_#{System.unique_integer([:positive])}"
     reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
