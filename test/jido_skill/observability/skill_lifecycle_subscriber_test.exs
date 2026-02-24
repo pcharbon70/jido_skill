@@ -182,14 +182,24 @@ end
 
 defmodule Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia do
   def whereis_name({registry, lookup_plan}) do
-    {lookup_index, fail_lookup?} =
+    {lookup_index, fail_lookup?, fail_mode} =
       Agent.get_and_update(lookup_plan, fn %{count: count, fail_on: fail_on} = state ->
         next = count + 1
-        {{next, MapSet.member?(fail_on, next)}, %{state | count: next}}
+        mode = Map.get(state, :fail_mode, :raise)
+        {{next, MapSet.member?(fail_on, next), mode}, %{state | count: next}}
       end)
 
     if fail_lookup? do
-      raise ArgumentError, "simulated lifecycle registry lookup failure at call #{lookup_index}"
+      case fail_mode do
+        :raise ->
+          raise ArgumentError, "simulated lifecycle registry lookup failure at call #{lookup_index}"
+
+        :exit ->
+          exit(:simulated_lifecycle_registry_lookup_exit)
+
+        {:exit, reason} ->
+          exit(reason)
+      end
     end
 
     registry
@@ -2445,6 +2455,171 @@ defmodule Jido.Code.Skill.Observability.SkillLifecycleSubscriberTest do
         {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
           metadata.type == "skill.pre" and
             metadata.skill_name == "after-repeated-call-exception-refresh-recovery-new-bus" and
+            metadata.bus == reloaded_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+  end
+
+  test "preserves cached lifecycle bus when bus_name lookup keeps exiting during refresh and migrates after recovery" do
+    old_bus_name = "bus_#{System.unique_integer([:positive])}"
+    reloaded_bus_name = "bus_#{System.unique_integer([:positive])}"
+
+    start_supervised!({Bus, [name: old_bus_name, middleware: []]})
+    start_supervised!({Bus, [name: reloaded_bus_name, middleware: []]})
+
+    registry =
+      start_supervised!(
+        {LifecycleSubscriberTestRegistry,
+         [
+           skills: [],
+           hook_defaults: %{},
+           bus_name: old_bus_name
+         ]}
+      )
+
+    lookup_plan =
+      start_supervised!(
+        {Agent,
+         fn ->
+           %{count: 0, fail_on: MapSet.new([6, 9]), fail_mode: {:exit, :bus_name_unavailable}}
+         end}
+      )
+
+    exception_registry =
+      {:via, Jido.Code.Skill.Observability.LifecycleSubscriberNthLookupVia,
+       {registry, lookup_plan}}
+
+    subscriber =
+      start_supervised!(
+        {SkillLifecycleSubscriber,
+         [
+           name: nil,
+           bus_name: old_bus_name,
+           registry: exception_registry,
+           refresh_bus_name: true,
+           hook_signal_types: ["skill/pre"],
+           fallback_to_default_hook_signal_types: false
+         ]}
+      )
+
+    assert Process.alive?(subscriber)
+    attach_handler!()
+
+    initial_state = :sys.get_state(subscriber)
+    initial_registry_subscription = initial_state.registry_subscription
+    assert initial_state.bus_name == old_bus_name
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "before-repeated-bus-name-exit-refresh"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "before-repeated-bus-name-exit-refresh" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    assert :ok = LifecycleSubscriberTestRegistry.set_bus_name(registry, reloaded_bus_name)
+    drain_telemetry_messages()
+    assert :ok = publish_registry_update_signal(old_bus_name)
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == old_bus_name and
+        state.registry_subscription == initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          old_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-repeated-bus-name-exit-refresh-old-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "after-repeated-bus-name-exit-refresh-old-bus" and
+            metadata.bus == old_bus_name
+      after
+        80 ->
+          false
+      end
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            reloaded_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-repeated-bus-name-exit-refresh-new-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert :ok = publish_registry_update_signal(old_bus_name)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(subscriber)
+
+      state.bus_name == reloaded_bus_name and
+        state.registry_subscription != initial_registry_subscription and
+        Map.has_key?(state.subscriptions, "skill.pre")
+    end)
+
+    drain_telemetry_messages()
+
+    assert_unobserved_over_time(
+      fn ->
+        :ok =
+          publish_lifecycle_signal(
+            old_bus_name,
+            "skill.pre",
+            "/hooks/skill/pre",
+            "after-repeated-bus-name-exit-recovery-old-bus"
+          )
+      end,
+      6,
+      80
+    )
+
+    assert_eventually(fn ->
+      :ok =
+        publish_lifecycle_signal(
+          reloaded_bus_name,
+          "skill.pre",
+          "/hooks/skill/pre",
+          "after-repeated-bus-name-exit-recovery-new-bus"
+        )
+
+      receive do
+        {:telemetry, @telemetry_event, %{count: 1}, metadata} ->
+          metadata.type == "skill.pre" and
+            metadata.skill_name == "after-repeated-bus-name-exit-recovery-new-bus" and
             metadata.bus == reloaded_bus_name
       after
         80 ->
