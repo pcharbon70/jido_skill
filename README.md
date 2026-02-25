@@ -2,6 +2,18 @@
 
 Skill-only runtime for Jido-based markdown skills with signal-first dispatch.
 
+## Installation
+
+Add `jido_skill` to your dependencies:
+
+```elixir
+def deps do
+  [
+    {:jido_skill, "~> 0.1.0"}
+  ]
+end
+```
+
 ## Terminal Commands
 
 Build the local `skill` escript:
