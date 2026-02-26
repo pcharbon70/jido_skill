@@ -2,6 +2,8 @@
 
 This guide covers common runtime operations and failure checks.
 
+For a full terminal command reference, see `docs/user/cli-commands-and-options.md`.
+
 ## Daily Operations
 
 Reload skills and settings:

@@ -96,6 +96,8 @@ Jido.Code.Skill.SkillRuntime.SkillRegistry.reload()
 
 ## 6) Invoke a Skill from Terminal
 
+For full command and option details, see `docs/user/cli-commands-and-options.md`.
+
 Run by mix task:
 
 ```bash
